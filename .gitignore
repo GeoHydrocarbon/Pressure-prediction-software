@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+outputs/
+build/
+dist/
+.venv/
+*.sgy
+*.segy
+*.pt
+*.npz

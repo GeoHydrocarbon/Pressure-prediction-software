@@ -1,0 +1,10 @@
+numpy
+pandas
+scipy
+openpyxl
+scikit-learn
+PyYAML
+segyio
+torch
+PySide6
+matplotlib
