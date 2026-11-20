@@ -5,6 +5,9 @@ import sys
 
 
 def main():
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
     if len(sys.argv) > 1 and sys.argv[1] == "--pressure-worker":
         module = sys.argv[2]
         if module not in ("overpressure", "overpressure.slice_worker", "overpressure.seismic_geometry"):

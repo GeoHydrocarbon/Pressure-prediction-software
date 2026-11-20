@@ -18,7 +18,8 @@ def main():
     gui = app_dir / 'PressurePrediction.exe'
     root = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix='pressure_release_') as temp:
-        folder = Path(temp)
+        folder = Path(temp) / '中文 项目'
+        folder.mkdir()
         cfg = yaml.safe_load((root / 'project.example.yaml').read_text(encoding='utf-8'))
         cfg['data']['training_selection'] = 'checked_files'
         cfg['training'].update(epochs=2, patience=2, batch_size=32)
@@ -78,8 +79,12 @@ def main():
         run('overpressure',['prepare-seismic-view','--project',str(project),'--result',str(seismic_results[0].parent)])
         index=seismic_results[0].parent/'volume_index.npz'
         assert index.is_file()
-        messages=run('overpressure.slice_worker',['--index',str(index)],json.dumps({'command':'close'})+'\n')
-        assert '"ready"' in messages
+        requests=[{'id':'a'*32,'mode':'inline','value':10},{'command':'close'}]
+        messages=run('overpressure.slice_worker',['--index',str(index)],'\n'.join(map(json.dumps,requests))+'\n')
+        events=[json.loads(line) for line in messages.splitlines() if line.startswith('{')]
+        assert any(event.get('event')=='ready' for event in events)
+        assert any(event.get('event')=='slice' for event in events), messages
+        assert not any(event.get('event')=='error' for event in events), messages
         report = folder/'gui.json'
         result = subprocess.run([str(gui),'--gui-smoke',str(report)],env=env,cwd=folder,timeout=60)
         if result.returncode or not report.exists(): raise RuntimeError('Packaged GUI did not start')
