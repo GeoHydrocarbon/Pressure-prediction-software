@@ -181,7 +181,7 @@ class DataContractTests(unittest.TestCase):
     def test_project_relative_path_is_independent_of_working_directory(self):
         path = self.folder / "project.yaml"
         path.write_text(yaml.safe_dump(self.cfg, allow_unicode=True), encoding="utf-8")
-        self.assertEqual(load_project(path).resolve("wells.csv"), self.folder / "wells.csv")
+        self.assertEqual(load_project(path).resolve("wells.csv"), (self.folder / "wells.csv").resolve())
 
     def test_old_project_depth_fields_are_ignored_and_cli_audit_still_works(self):
         from contextlib import redirect_stdout
