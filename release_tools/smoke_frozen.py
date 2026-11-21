@@ -56,8 +56,9 @@ def main():
         spec.samples=[0.,10.,20.]; spec.ilines=[10,11]; spec.xlines=[20,21]
         seismic = folder/'synthetic.sgy'
         with segyio.create(str(seismic), spec) as f:
+            f.bin[segyio.BinField.Interval] = 10000
             for i in range(4):
-                f.header[i] = {189:10+i//2,193:20+i%2}
+                f.header[i] = {189:10+i//2,193:20+i%2,109:0,115:3,117:10000}
                 f.trace[i] = np.full(3,2300,dtype='float32')
         geometry = json.loads(run('overpressure.seismic_geometry', [], json.dumps({'files':{'density':str(seismic)},'headers':{'inline':189,'crossline':193}})))
         assert geometry['files']['density']['inline']==[10,11]
