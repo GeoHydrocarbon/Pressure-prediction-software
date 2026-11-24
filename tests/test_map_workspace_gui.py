@@ -56,7 +56,7 @@ class MapWorkspaceGuiTests(unittest.TestCase):
         self.addCleanup(warnings.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.folder = Path(self.temp.name)
+        self.folder = Path(self.temp.name).resolve()
         self.cfg = yaml.safe_load((ROOT / 'project.yaml').read_text(encoding='utf-8'))
         self.cfg['data'].update(training_selection='well_library', development_wells=[], validation_wells=[], blind_wells=[],
                                 well_files=[], well_imports=[], features=['Depth', 'AC', 'DEN', 'Ip'],
