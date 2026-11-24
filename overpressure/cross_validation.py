@@ -9,7 +9,9 @@ from sklearn.preprocessing import StandardScaler
 
 from .config import FEATURES, Project, selected_features, feature_units
 from .data import PreparedData, WellAudit, audit_wells, development_fingerprint
-from .training import Cancelled, emit, metrics, save_json, train
+from .modules.training import train
+from .jobs import Cancelled, emit, save_json
+from .evaluation import metrics
 
 
 def cross_validate(project: Project, *, smoke=False, cancel_file=None):

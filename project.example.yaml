@@ -1,8 +1,6 @@
 schema_version: 1
 name: 新项目
 data:
-  split_method: random_points
-  train_ratio: 0.8
   columns:
     well: 井
     Depth: Depth
@@ -16,76 +14,67 @@ data:
     DEN: g/cc
     Ip: g/cc*m/s
     Pp: MPa
-  development_wells: []
-  validation_wells: []
-  blind_wells: []
-  training_selection: well_library
-  well_files: []
-  well_imports: []
   features:
   - Depth
   - AC
   - DEN
   - Ip
-  target_curve: Pp
   feature_units:
     Depth: m
     AC: us/ft
     DEN: g/cc
     Ip: g/cc*m/s
-    Pp: MPa
+  target_curve: Pp
+  development_wells: []
+  validation_wells: []
+  blind_wells: []
+  well_files: []
+  well_imports: []
+  training_selection: well_library
+  split_method: random_points
+  train_ratio: 0.8
 algorithm:
   name: mlp
   hidden_sizes:
-  - 256
+  - 128
   - 64
-  dropout: 0.15
+  dropout: 0.1
 training:
   epochs: 200
   batch_size: 256
-  learning_rate: 0.00054
+  learning_rate: 0.001
   seed: 42
-  patience: 15
+  patience: 20
 physics:
   enabled: false
   method: eaton_soft_loss
   weight: 0.1
-  eaton_exponent: 2.0
+  eaton_exponent: 1.5
   fluid_density: 1.03
-  rho_rock: 2.35
+  rho_rock: 2.45
   gravity: 9.8
-  nac_a: -0.000227
-  nac_b: 4.927273
+  nac_a: -0.00035
+  nac_b: 4.85
 seismic:
   block_traces: 32
+  time_convention: twt
+  audit_sample_traces: 101
+  header_fields:
+    inline: 189
+    crossline: 193
+    x: 181
+    y: 185
+    coordinate_scalar: 71
+    coordinate_units: 89
   density_file: ''
   impedance_file: ''
   density_unit: kg/m3
   impedance_unit: kg/m3*m/s
-  time_convention: twt
-  header_fields:
-    inline: 189
-    crossline: 193
-    x: 73
-    y: 77
-    coordinate_scalar: 71
-    coordinate_units: 89
-  audit_sample_traces: 101
   prediction_range:
     inline_start: 0
     inline_end: 0
     crossline_start: 0
     crossline_end: 0
-time_depth:
-  method: polynomial
-  coefficients:
-  - 0.0
-  - 1000.0
-  time_unit: s
-  time_convention: twt
-  depth_unit: m
-  table_file: ''
-output_dir: outputs
 well_prediction:
   columns:
     well: 井
@@ -107,14 +96,23 @@ well_prediction:
   measurement_units:
     Depth: m
     Pp: MPa
-  independence_confirmed: false
+  use_library: true
   max_gap_m: 0.0
   well_files: []
   well_imports: []
   measurement_files: []
   measurement_imports: []
-  use_library: true
   library_wells: []
+  independence_confirmed: false
+time_depth:
+  method: polynomial
+  coefficients:
+  - 0.0
+  - 1000.0
+  time_unit: s
+  time_convention: twt
+  depth_unit: m
+  table_file: ''
 project_data:
   wells: []
   well_assets: []
@@ -122,3 +120,6 @@ project_data:
   max_distance: 25.0
   vertical_fallback: true
   pressure_result: ''
+workspace: {}
+traditional_prediction: {}
+output_dir: outputs

@@ -32,12 +32,9 @@ def feature_units(cfg,features=None):
     data=cfg.get('data',cfg)
     return {name:CANONICAL_UNITS.get(name,data.get('feature_units',{}).get(name,'')) for name in (features or selected_features(cfg))}
 
-# Entries are capability declarations, not executable implementations.
-ALGORITHMS = {
-    "mlp": {"planned": False, "training_physics": ["eaton_soft_loss"]},
-    "rf": {"planned": True, "training_physics": []},
-    "xgboost": {"planned": True, "training_physics": []},
-}
+from .algorithms.registry import capabilities
+
+ALGORITHMS = capabilities()
 
 
 def unit_factor(field: str, unit: str) -> float:

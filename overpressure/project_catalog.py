@@ -139,7 +139,7 @@ class ProjectCatalog(QWidget):
         return dict(well_assets=deepcopy(self.assets),horizons=deepcopy(self.horizons),max_distance=self.distance.value(),vertical_fallback=self.vertical.isChecked())
 
     def well_config(self):
-        cfg=self.owner.collect_settings(); catalog=cfg['project_data']; assets=deepcopy(catalog['well_assets'])
+        cfg=self.owner.collect_settings('seismic'); catalog=cfg['project_data']; assets=deepcopy(catalog['well_assets'])
         for a in assets:a['path']=str(self.owner.project.resolve(a['path']))
         for well in self.owner.library.wells:
             for ref in well['curves']:

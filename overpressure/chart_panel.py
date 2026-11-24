@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPu
     QLabel, QFileDialog, QMessageBox, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem,
     QAbstractItemView, QHeaderView, QDialog, QFormLayout, QFontComboBox, QDoubleSpinBox, QSpinBox,
     QCheckBox, QDialogButtonBox,QTabWidget,QSizePolicy)
+from .plot_frame import PlotResizeControls
 from .plot_settings import TypographyControls,link_dimensions
 from .charts import FigureStyle, training_figure, pressure_figure, folds_figure, scatter_figure, export_figure
 from .evaluation import evaluation_table, MAPE_RULE
@@ -57,6 +58,9 @@ class ChartPanel(QWidget):
         self.preview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         for widget in (self.preview,self.views):
             widget.setMinimumSize(0,0);widget.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
+        self.preview_controls=PlotResizeControls(self.aspect_preview,'chart',self)
+        layout.insertWidget(layout.indexOf(self.views),self.preview_controls)
+        self.preview_controls.lock.toggled.connect(self.set_preview_lock)
         self.aspect_preview.set_preview_mode('fit')
         self.views.addWidget(self.preview)
         self.table = QTableWidget(); self.table.setAlternatingRowColors(True)
@@ -68,6 +72,9 @@ class ChartPanel(QWidget):
         self.note.setWordWrap(True); layout.addWidget(self.note); self.note.hide()
         self.mode.currentIndexChanged.connect(self.redraw); self.well.currentTextChanged.connect(self.redraw)
         self.redraw()
+
+    def set_preview_lock(self,checked):
+        self.image_ratio_locked=bool(checked);self.aspect_preview.lock_ratio=bool(checked)
 
     def choose_directory(self):
         path = QFileDialog.getExistingDirectory(self, "选择成果目录")
@@ -187,6 +194,7 @@ class ChartPanel(QWidget):
         if mode == 1 and self.selected_well() is None and self.well.count() > 1:
             self.well.blockSignals(True); self.well.setCurrentIndex(1); self.well.blockSignals(False)
         is_table = mode in (4, 5); self.views.setCurrentIndex(int(is_table)); self.note.setVisible(is_table)
+        self.preview_controls.setVisible(not is_table)
         self.toolbar.setVisible(not is_table); self.style_button.setEnabled(not is_table); self.export_button.setEnabled(not is_table)
         self.table_export.setEnabled(not self.pressures.empty)
         self.table_export.setText("导出匹配明细" if mode == 5 else "导出指标表")
@@ -225,11 +233,11 @@ class ChartPanel(QWidget):
             if not integer: edit.setDecimals(2)
             edit.setObjectName('chart_'+key);inputs[key] = edit; form.addRow(label, edit);edit.setValue(getattr(self.style,key))
         ratio,lock=link_dimensions(form,inputs['width_cm'],inputs['height_cm'],inputs['dpi'],prefix='chart',locked=self.image_ratio_locked)
-        preview_mode=QLabel('自动等比例完整显示');preview_mode.setObjectName('chart_preview_mode');form.addRow('屏幕预览',preview_mode)
+        preview_mode=QLabel('完整显示，可拖动图框调整预览');preview_mode.setObjectName('chart_preview_mode');form.addRow('屏幕预览',preview_mode)
         def fill(style):
             lock.setChecked(False);typography.fill(style)
             for key, edit in inputs.items(): edit.setValue(getattr(style, key))
-        explanation = QLabel('预览图按当前绘图区自动等比例缩放，完整显示，无需滚动。窗口缩放或侧栏开关后自动调整；导出仍使用指定图宽、图高及 DPI。SVG/PDF 支持矢量文字与线条，密集散点按所选 DPI 栅格化。')
+        explanation = QLabel('拖动图框边缘或四角可调整预览大小及纵横比，图像始终完整显示在绘图区内。“适应窗口”保留当前比例，“恢复设置比例”恢复本页指定的宽高比；导出仍使用指定图宽、图高及 DPI。SVG/PDF 支持矢量文字与线条，密集散点按所选 DPI 栅格化。')
         explanation.setWordWrap(True); layout.addWidget(explanation)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Close | QDialogButtonBox.StandardButton.RestoreDefaults)
         buttons.button(QDialogButtonBox.StandardButton.Apply).setText('应用')
@@ -240,6 +248,7 @@ class ChartPanel(QWidget):
                 style=FigureStyle(**typography.collect(),**{key:edit.value() for key,edit in inputs.items()}).validate()
                 style.save(self.settings_path)
                 self.preview_mode='fit';self.image_ratio_locked=lock.isChecked()
+                self.preview_controls.lock.setChecked(self.image_ratio_locked);self.set_preview_lock(self.image_ratio_locked)
                 self.aspect_preview.set_preview_mode(self.preview_mode);self.apply_style(style,persist=False)
             except Exception as exc: QMessageBox.warning(dialog, "绘图设置需要修改", str(exc))
         buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(apply)

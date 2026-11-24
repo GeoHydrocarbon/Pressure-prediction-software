@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication,QToolBar
 except ImportError as exc:
     raise unittest.SkipTest("该环境的 Qt 运行库不可用；GUI 测试请在 Anaconda base 环境运行") from exc
 import yaml
@@ -24,6 +24,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GuiContractTests(unittest.TestCase):
+    def test_business_module_entries_open_dialogs_without_duplicate_toolbar_actions(self):
+        shell=self.window.shell
+        self.assertEqual(list(shell.module_actions),['training','traditional','wells','seismic'])
+        self.assertEqual(self.window.pages.tabText(5),'三维地震预测')
+        for name,page in [('training',1),('traditional',7),('wells',3),('seismic',5)]:
+            action=shell.module_actions[name]
+            self.assertIsNone(action.menu())
+            action.trigger()
+            self.assertEqual(self.window.pages.currentIndex(),page)
+            self.assertTrue(shell.workspace.module_dialogs[page].isVisible())
+            self.assertIsNone(self.window.process)
+            shell.workspace.module_dialogs[page].hide()
+        for name in ('rf','xgboost'):
+            index=self.window.algorithm.findData(name)
+            self.assertFalse(self.window.algorithm.model().item(index).isEnabled())
+        self.assertEqual(self.window.collect_settings()['algorithm']['name'],'mlp')
+        toolbar=self.window.findChild(QToolBar,'mainTools')
+        self.assertFalse({'模型训练','井预测','地震预测'} & {action.text() for action in toolbar.actions()})
+
     def test_sparse_pressure_column_is_available_even_when_preview_has_no_values(self):
         from overpressure.well_library_ui import CurveImportDialog
         path=Path(self.tmp.name)/'sparse.csv'

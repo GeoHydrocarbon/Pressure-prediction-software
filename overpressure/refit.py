@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 
 from .config import FEATURES, Project, selected_features, feature_units
 from .data import PreparedData, audit_wells, development_fingerprint, sha256_file
-from .training import train
+from .modules.training import train
 
 
 def refit(project: Project, cv_folder, *, smoke=False, cancel_file=None):

@@ -29,7 +29,12 @@ from .batch_files import BatchFilesPanel
 ROOT = user_data_root()
 
 
-class MainWindow(QMainWindow):
+from .ui_modules.training import TrainingModuleUI
+from .ui_modules.wells import WellModuleUI
+from .ui_modules.seismic import SeismicModuleUI
+
+
+class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
     def __init__(self, project_path=None):
         super().__init__()
         self.project = load_project(project_path or default_project())
@@ -62,6 +67,10 @@ class MainWindow(QMainWindow):
         self.build_seismic()
         from .slice_panel import SlicePanel
         self.slices = SlicePanel(self.start_task);self.slices_page=self.slices; self.pages.addWidget(self.slices_page); self.actions.append(self.slices.load_button)
+        from .traditional_panel import TraditionalPanel
+        self.traditional=TraditionalPanel(self)
+        self.traditional_page=self.page('传统压力预测','正常压实趋势标定与 Eaton 井压力预测。',show_heading=False)
+        self.traditional_page.addWidget(self.traditional)
         self.slices.well_config_provider = self.catalog.well_config
         self.slices.horizon_config_provider = self.catalog.horizon_configs
         self.slices.interpolation_registered = self.catalog.register_interpolated_horizon
@@ -76,12 +85,16 @@ class MainWindow(QMainWindow):
         self.invalidate_seismic_geometry()
         polish_layouts(self)
         self.screen_guard=WindowBoundsGuard(self)
+        for document in self.shell.workspace.documents.values():document.hide()
+        self.shell.workspace.show_map()
 
     def navigate_to_page(self,index):
         if index==2 and hasattr(self,'shell'):
             self.shell.open_time_depth()
             self.nav.blockSignals(True);self.nav.setCurrentRow(self.pages.currentIndex());self.nav.blockSignals(False)
-        else:self.pages.setCurrentIndex(index)
+        else:
+            self.pages.setCurrentIndex(index)
+            if hasattr(self,'shell'):self.shell.workspace.show_page(index)
 
     def page(self, title, description, *, scrollable=True,show_heading=True):
         body = QWidget(); body.setObjectName('pageBody'); layout = QVBoxLayout(body)
@@ -137,7 +150,6 @@ class MainWindow(QMainWindow):
                 combo = self.combo(list(UNITS[field])); line.addWidget(combo); self.unit_edits[field] = combo
             mapping.addRow("井名" if field == "well" else field, row)
         page.addWidget(fields)
-        self.button(page, "检查井数据", lambda: self.start_task("audit", ["--wells-only"]))
         self.button(page, "检查井数据与地震对应关系", lambda: self.start_task("audit", []))
         page.addWidget(self.catalog)
         page.addStretch()
@@ -157,59 +169,6 @@ class MainWindow(QMainWindow):
         value = self.pressure_result.text().strip()
         self.slices.result_dir.setText(str(self.project.resolve(value)) if value else ''); self.slices.load_result()
 
-    def build_training(self):
-        page = self.page("模型训练", "勾选的井全部参与所选训练模式。随机划分默认 80% 训练 / 20% 验证，训练比例可自定义，剩余部分用于验证；也可选择留一井验证。")
-        page.addWidget(self.library.training_card)
-        group = Card("算法与训练参数");self.training_algorithm_card=group; form = QFormLayout(group)
-        form.addRow('训练模式',self.split_method);form.addRow('随机模式训练比例（%，默认 80）',self.train_percent)
-        self.algorithm = self.combo(["MLP", "RF（后续接入）", "XGBoost（后续接入）"])
-        for i in (1, 2):
-            self.algorithm.model().item(i).setEnabled(False)
-        form.addRow("算法", self.algorithm)
-        self.hidden = QLineEdit(); form.addRow("隐藏层宽度", self.hidden)
-        self.dropout = self.number(0, .95, 2); form.addRow("Dropout", self.dropout)
-        self.epochs = QSpinBox(); self.epochs.setRange(1, 100000); form.addRow("最多训练轮数", self.epochs)
-        self.batch = QSpinBox(); self.batch.setRange(1, 65536); form.addRow("批量大小", self.batch)
-        self.lr = self.number(.0000001, 1, 7); form.addRow("学习率", self.lr)
-        self.patience = QSpinBox(); self.patience.setRange(1, 10000); form.addRow("早停耐心轮数", self.patience)
-        self.seed = QLineEdit(); form.addRow("随机种子（划分与训练）", self.seed)
-        page.addWidget(group)
-        physical = Card("可选物理约束");self.training_physics_card=physical; physform = QFormLayout(physical)
-        self.physical_enabled = QCheckBox("训练中加入 Eaton 软物理损失")
-        physform.addRow(self.physical_enabled)
-        self.physics_edits = {}
-        for key, caption, low, high, decimals in (
-            ("weight", "物理损失权重", 0, .9999, 4), ("eaton_exponent", "Eaton 指数", .01, 20, 4),
-            ("fluid_density", "流体密度（g/cc）", .01, 10, 4), ("rho_rock", "岩石密度（g/cc）", .01, 10, 4),
-            ("gravity", "重力加速度（m/s²）", .01, 100, 4), ("nac_a", "正常压实趋势 a", -100, 100, 9),
-            ("nac_b", "正常压实趋势 b", -100, 100, 6)):
-            edit = self.number(low, high, decimals); self.physics_edits[key] = edit; physform.addRow(caption, edit)
-        self.physical_enabled.toggled.connect(lambda on: [edit.setEnabled(on) for edit in self.physics_edits.values()])
-        page.addWidget(physical)
-        self.button(page, "检查当前训练模式（小样本）", lambda: self.start_training_mode(True))
-        self.training_button=self.button(page, "开始随机划分训练", lambda:self.start_training_mode(False))
-        self.split_method.currentIndexChanged.connect(self.update_training_mode_controls)
-        self.train_percent.valueChanged.connect(self.update_training_mode_controls)
-        self.update_training_mode_controls()
-        self.advanced_toggle = QCheckBox("留一井完成后：使用全部参与井训练最终模型")
-        page.addWidget(self.advanced_toggle)
-        self.advanced_training = QWidget(); advanced = QVBoxLayout(self.advanced_training)
-        hint = QLabel("留一井验证输出各井验证结果和汇总指标；预测新井或地震体时，可在这里根据验证记录训练最终模型。随机划分模式无需再次重训。"); hint.setWordWrap(True); advanced.addWidget(hint)
-        refit_form = QFormLayout(); self.refit_cv = self.path_field(refit_form, "留一井验证成果目录", directory=True); advanced.addLayout(refit_form)
-        self.button(advanced, "验证全部参与井重训流程（小样本）", lambda: self.start_task("refit", ["--cv", self.refit_cv.text(), "--smoke"]))
-        self.button(advanced, "使用全部参与井重训最终模型", lambda: self.start_task("refit", ["--cv", self.refit_cv.text()]))
-        page.addWidget(self.advanced_training); self.advanced_training.hide()
-        self.advanced_toggle.toggled.connect(self.advanced_training.setVisible)
-        page.addStretch()
-
-    def start_training_mode(self,smoke=False):
-        self.start_task('cross-validate' if self.split_method.currentIndex() else 'train',['--smoke'] if smoke else [])
-
-    def update_training_mode_controls(self,*_):
-        leave_one=bool(self.split_method.currentIndex());self.train_percent.setEnabled(not leave_one)
-        ratio=self.train_percent.value()
-        self.training_button.setText('开始留一井验证' if leave_one else f'开始随机划分训练（{ratio:g}% / {100-ratio:g}%）')
-
     def build_time_depth(self):
         page = self.page("时深关系", "设置项目使用的公式或时间深度表，并核对时间单位、单/双程时间及输出深度单位。",show_heading=False)
         card=Card('时间与深度转换参数'); form = QFormLayout(card)
@@ -228,51 +187,6 @@ class MainWindow(QMainWindow):
     def update_time_depth_controls(self,*_):
         table=self.td_method.currentText()=='table'
         self.coefficients.setEnabled(not table);self.td_file.parentWidget().setEnabled(table)
-
-    def build_results(self):
-        page = self.page('井预测与验证','选择模型与待预测井，设置实测点匹配后开始预测；数据从左侧井对象导入。',show_heading=False)
-        page.setAlignment(Qt.AlignmentFlag.AlignTop)
-        form = QFormLayout()
-        self.bundle_path = self.path_field(form,'模型目录',directory=True)
-        from .well_panel import WellPredictionPanel
-        self.well_prediction = WellPredictionPanel(self,model_form=form); page.addWidget(self.well_prediction)
-        self.bundle_path.textChanged.connect(lambda: self.well_prediction.independent.setChecked(False))
-        self.log = QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMinimumHeight(240); page.addWidget(self.log, 1)
-
-    def build_seismic(self):
-        page = self.page("地震压力预测", "填写 Inline、Crossline 起止线号，预测矩形范围内已有的全部道（包含边界）；也可预测全体。按道分块计算，保留原始时间采样与道头，缺失交点不补道。")
-        card=Card('预测模型与空间范围'); form = QFormLayout(card)
-        self.seismic_bundle = self.path_field(form, "正式模型目录", directory=True)
-        self.prediction_geometry_label = QLabel(); self.prediction_geometry_label.setWordWrap(True); form.addRow('输入地震线号范围',self.prediction_geometry_label)
-        refresh = QPushButton('刷新输入地震线号范围'); refresh.clicked.connect(self.invalidate_seismic_geometry); form.addRow(refresh)
-        self.prediction_range_edits = {}
-        for key,label in [('inline_start','Inline 起始线号'),('inline_end','Inline 结束线号'),('crossline_start','Crossline 起始线号'),('crossline_end','Crossline 结束线号')]:
-            edit=QSpinBox(); edit.setRange(-2147483648,2147483647); edit.setKeyboardTracking(False)
-            self.prediction_range_edits[key]=edit; form.addRow(label,edit)
-        self.block_traces = QSpinBox(); self.block_traces.setRange(1, 256); self.block_traces.setValue(32); form.addRow("每块道数（可按内存调整）", self.block_traces)
-        page.addWidget(card)
-        form = self.seismic_data_form
-        self.den_unit = self.combo(list(UNITS["DEN"])); form.addRow("地震密度源单位", self.den_unit)
-        self.ip_unit = self.combo(list(UNITS["Ip"])); form.addRow("地震波阻抗源单位", self.ip_unit)
-        self.seismic_convention = self.combo(["twt", "owt"]); form.addRow("地震时间类型（双程 / 单程）", self.seismic_convention)
-        advanced = QCheckBox("显示 SEG-Y 道头设置（通常保留默认值）"); self.seismic_data_layout.addWidget(advanced)
-        header_widget = QWidget(); form = QFormLayout(header_widget); self.seismic_data_layout.addWidget(header_widget)
-        header_widget.hide(); advanced.toggled.connect(header_widget.setVisible)
-        self.seismic_data_layout.addStretch()
-        self.header_edits = {}
-        for key, title in (("inline", "Inline 道头位置"), ("crossline", "Crossline 道头位置"), ("x", "X 坐标道头位置"), ("y", "Y 坐标道头位置"), ("coordinate_scalar", "坐标缩放道头位置"), ("coordinate_units", "坐标单位道头位置")):
-            edit = QSpinBox(); edit.setRange(1, 240); self.header_edits[key] = edit; form.addRow(title, edit)
-        self.seismic_range_button=self.button(page, "开始自定义范围 SEG-Y 预测", self.predict_custom_range)
-        self.seismic_full_button=self.button(page, "开始全体 SEG-Y 预测", lambda: self.start_task("predict-seismic", ["--bundle", self.seismic_bundle.text(), "--full", "--block-traces", str(self.block_traces.value())]))
-        page.addStretch()
-
-    def predict_custom_range(self):
-        values={key:edit.value() for key,edit in self.prediction_range_edits.items()}
-        if values['inline_start'] > values['inline_end'] or values['crossline_start'] > values['crossline_end']:
-            QMessageBox.warning(self,'预测范围需要修改','Inline、Crossline 的起始线号必须小于或等于结束线号。'); return
-        extra=['--bundle',self.seismic_bundle.text(),'--block-traces',str(self.block_traces.value())]
-        for key,value in values.items():extra.extend(['--'+key.replace('_','-'),str(value)])
-        self.start_task('predict-seismic',extra)
 
     def set_geometry_text(self,text):
         self.data_geometry_label.setText(text); self.prediction_geometry_label.setText(text)
@@ -298,7 +212,7 @@ class MainWindow(QMainWindow):
         if signature==self.geometry_signature:return
         self.geometry_signature=signature
         if not config['files'] or not any(Path(p).is_file() for p in config['files'].values()):
-            self.set_geometry_text('尚未找到输入 SEG-Y 文件，请在“项目与数据 → 地震数据”选择文件。');return
+            self.set_geometry_text('尚未找到预测输入 SEG-Y 文件，请在“数据 → 导入数据 → 地震输入与单位”选择文件。');return
         generation=self.geometry_generation
         self.set_geometry_text('正在读取 SEG-Y 道头范围（不读取属性体）……')
         proc=QProcess(self); self.geometry_process=proc
@@ -351,6 +265,9 @@ class MainWindow(QMainWindow):
             edit.setText(data["columns"][field])
         for field, edit in self.unit_edits.items():
             edit.setCurrentText(data["units"][field])
+        index=self.algorithm.findData(cfg['algorithm']['name'])
+        if index < 0:raise ValueError('项目包含未知训练算法')
+        self.algorithm.setCurrentIndex(index)
         self.hidden.setText(", ".join(map(str, cfg["algorithm"]["hidden_sizes"])))
         self.dropout.setValue(cfg["algorithm"]["dropout"])
         for attr, key in (("epochs", "epochs"), ("batch", "batch_size"), ("lr", "learning_rate"), ("patience", "patience")):
@@ -366,11 +283,13 @@ class MainWindow(QMainWindow):
         if hasattr(self,"shell"): self.shell.project_changed()
         self.well_prediction.populate(self.project)
         self.well_prediction.refresh_library(cfg.get('well_prediction',{}).get('library_wells',[]))
+        self.traditional.populate(cfg)
         self.library.migrate_legacy(cfg)
         self.invalidate_seismic_geometry()
 
-    def collect_settings(self):
+    def collect_settings(self, scope='all'):
         cfg = deepcopy(self.settings); data = cfg["data"]
+        independent_task=scope in ('prediction','seismic','traditional')
         cfg["project_data"] = self.catalog.collect(); cfg["project_data"]["pressure_result"] = self.pressure_result.text().strip()
         cfg['project_data']['wells']=deepcopy(self.library.wells)
         split = lambda text: [v.strip() for v in text.replace("，", ",").split(",") if v.strip()]
@@ -381,7 +300,7 @@ class MainWindow(QMainWindow):
         if self.library.active:
             data.update(training_selection='well_library',development_wells=self.library.checked(self.library.well_list),blind_wells=[],validation_wells=[],features=self.library.checked(self.library.feature_list),target_curve=self.library.target.currentText() or 'Pp',feature_units=self.library.selected_units())
         data['validation_wells']=[]
-        cfg["training"]["seed"] = int(self.seed.text().strip())
+        if not independent_task:cfg["training"]["seed"] = int(self.seed.text().strip())
         cfg["well_prediction"] = self.well_prediction.collect()
         for field, edit in self.column_edits.items(): data["columns"][field] = edit.text().strip()
         for field, edit in self.unit_edits.items(): data["units"][field] = edit.currentText()
@@ -389,11 +308,14 @@ class MainWindow(QMainWindow):
         cfg["seismic"].update(density_unit=self.den_unit.currentText(), impedance_unit=self.ip_unit.currentText(), time_convention=self.seismic_convention.currentText(), header_fields={key: edit.value() for key, edit in self.header_edits.items()})
         cfg["seismic"]["block_traces"] = self.block_traces.value()
         cfg['seismic']['prediction_range']={key:edit.value() for key,edit in self.prediction_range_edits.items()}
-        cfg["algorithm"].update(name="mlp", hidden_sizes=[int(v) for v in split(self.hidden.text())], dropout=self.dropout.value())
-        cfg["training"].update(epochs=self.epochs.value(), batch_size=self.batch.value(), learning_rate=self.lr.value(), patience=self.patience.value())
-        cfg["physics"]["enabled"] = self.physical_enabled.isChecked()
-        for key, edit in self.physics_edits.items(): cfg["physics"][key] = edit.value()
-        try:coefficients=[float(v) for v in split(self.coefficients.text())]
+        if not independent_task:
+            cfg["algorithm"].update(name=self.algorithm.currentData(), hidden_sizes=[int(v) for v in split(self.hidden.text())], dropout=self.dropout.value())
+            cfg["training"].update(epochs=self.epochs.value(), batch_size=self.batch.value(), learning_rate=self.lr.value(), patience=self.patience.value())
+            cfg["physics"]["enabled"] = self.physical_enabled.isChecked()
+            for key, edit in self.physics_edits.items(): cfg["physics"][key] = edit.value()
+        else:
+            cfg['data']=deepcopy(self.settings['data'])
+        try:coefficients=[float(v) for v in split(self.coefficients.text())] if scope not in ('prediction','training','traditional') else deepcopy(cfg['time_depth'].get('coefficients',[]))
         except ValueError:
             if self.td_method.currentText()!='table':raise
             coefficients=deepcopy(cfg['time_depth'].get('coefficients',[]))
@@ -402,12 +324,14 @@ class MainWindow(QMainWindow):
             depth_unit=self.td_depth_unit.currentText())
         if not cfg["algorithm"]["hidden_sizes"] or any(v <= 0 for v in cfg["algorithm"]["hidden_sizes"]):
             raise ValueError("隐藏层必须为正整数列表")
+        if hasattr(self,'shell'):cfg['workspace']=deepcopy(self.shell.workspace_settings())
+        cfg['traditional_prediction']=self.traditional.collect()
         strip_depth_metadata(cfg); validate_settings(cfg)
         return cfg
 
-    def save_settings(self):
+    def save_settings(self, scope='all'):
         try:
-            cfg = self.collect_settings()
+            cfg = self.collect_settings(scope)
             temp = self.project.path.with_suffix(".yaml.tmp")
             temp.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
             temp.replace(self.project.path)
@@ -422,10 +346,45 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 project = load_project(path)
-                if project.settings["algorithm"]["name"] != "mlp":
-                    raise ValueError("当前界面仅支持 MLP 项目")
-                self.project = project; self.settings = deepcopy(project.settings); self.populate()
+                from .algorithms.registry import get_algorithm
+                get_algorithm(project.settings["algorithm"]["name"]).require_available()
+                self.project = project; self.settings = deepcopy(project.settings); self.populate();self.shell.workspace.show_map()
             except Exception as exc: QMessageBox.warning(self, "无法打开项目", str(exc))
+
+    def new_project(self):
+        path,_=QFileDialog.getSaveFileName(self,'新建超压预测项目',str(self.project.path.parent/'新项目.yaml'),'项目文件 (*.yaml)')
+        if not path:return
+        try:
+            cfg=deepcopy(self.settings);cfg['name']=Path(path).stem;cfg['output_dir']='outputs'
+            cfg['data'].update(training_selection='well_library',well_files=[],well_imports=[],development_wells=[],validation_wells=[],blind_wells=[],features=list(FEATURES),target_curve='Pp',feature_units={},split_method='random_points')
+            cfg['data'].pop('well_file',None)
+            cfg['project_data']=dict(wells=[],well_assets=[],horizons=[],pressure_result='',max_distance=25.,vertical_fallback=True)
+            cfg['workspace']={};cfg['traditional_prediction']={};cfg['physics']['enabled']=False
+            cfg['seismic'].update(density_file='',impedance_file='',prediction_range={k:0 for k in self.prediction_range_edits})
+            cfg['time_depth']=dict(method='polynomial',coefficients=[0.,1000.],time_unit='s',time_convention='twt',depth_unit='m',table_file='')
+            cfg['well_prediction'].update(well_files=[],well_imports=[],measurement_files=[],measurement_imports=[],library_wells=[],use_library=True,independence_confirmed=False)
+            target=Path(path).resolve();target.write_text(yaml.safe_dump(cfg,allow_unicode=True,sort_keys=False),encoding='utf-8')
+            self.project=load_project(target);self.settings=deepcopy(self.project.settings);self.populate();self.shell.workspace.show_map()
+        except Exception as exc:QMessageBox.warning(self,'无法新建项目',str(exc))
+
+    def save_project_as(self):
+        path,_=QFileDialog.getSaveFileName(self,'项目另存为',str(self.project.path),'项目文件 (*.yaml)')
+        if not path:return
+        try:
+            cfg=self.collect_settings()
+            # Preserve references when the project file moves to another directory.
+            keys={'path','output_dir','pressure_result','well_model','seismic_model','refit_cv','table_file','density_file','impedance_file','well_file','measurement_file','source_report','result'}
+            lists={'well_files','well_imports','measurement_files','measurement_imports'}
+            def absolute(value):
+                if isinstance(value,dict):
+                    return {k:str(self.project.resolve(v)) if k in keys and isinstance(v,str) and v else
+                            [str(self.project.resolve(p)) for p in v] if k in lists and isinstance(v,list) else absolute(v) for k,v in value.items()}
+                if isinstance(value,list):return [absolute(item) for item in value]
+                return value
+            cfg=absolute(cfg);target=Path(path).resolve();cfg['name']=target.stem
+            target.write_text(yaml.safe_dump(cfg,allow_unicode=True,sort_keys=False),encoding='utf-8')
+            self.project=load_project(target);self.settings=deepcopy(self.project.settings);self.populate();self.shell.workspace.show_map()
+        except Exception as exc:QMessageBox.warning(self,'无法另存项目',str(exc))
 
     def check_time_depth(self):
         if self.save_settings():
@@ -440,11 +399,14 @@ class MainWindow(QMainWindow):
 
     def start_task(self, command, extra):
         if self.process is not None: return
-        if command in ('train','cross-validate','audit','refit') and self.library.worker is not None:
+        if command in ('train','cross-validate','audit','refit','traditional-trend','traditional-predict') and self.library.worker is not None:
             QMessageBox.information(self,'正在导入井数据','请等待井库导入完成。');return
         if command in ('train','cross-validate','audit','refit') and not self.library.active and self.train_files.active and not self.train_files.ready():
             QMessageBox.information(self,'先检查批量文件','请先检查批量文件并等待完成；缺少字段或无法读取的文件请修正或取消勾选。');return
-        if command != "prepare-seismic-view" and not self.save_settings(): return
+        scope='prediction' if command=='predict-wells' else 'seismic' if command=='predict-seismic' else 'all'
+        if command in ('train','cross-validate','refit') or command=='audit' and '--wells-only' in extra:scope='training'
+        if command in ('traditional-trend','traditional-predict'):scope='traditional'
+        if command != "prepare-seismic-view" and not self.save_settings(scope): return
         if command == "refit" and not self.refit_cv.text().strip():
             QMessageBox.information(self, "选择验证记录", "请先选择完成的留一井验证成果目录。"); return
         if command == "predict-wells" and not self.bundle_path.text().strip():
@@ -457,7 +419,7 @@ class MainWindow(QMainWindow):
         self.shell.task_dock.show()
         self.progress.setRange(0, 0)
         for button in self.actions: button.setEnabled(False)
-        self.cancel_button.setEnabled(command in ("train", "cross-validate", "refit", "predict-seismic", "prepare-seismic-view", "predict-wells"))
+        self.cancel_button.setEnabled(command in ("train", "cross-validate", "refit", "predict-seismic", "prepare-seismic-view", "predict-wells",'traditional-trend','traditional-predict'))
         process = QProcess(self); self.process = process
         environment = QProcessEnvironment.systemEnvironment(); environment.insert("PYTHONIOENCODING", "utf-8")
         cache = ROOT / "outputs" / "matplotlib_cache"; cache.mkdir(parents=True, exist_ok=True)
@@ -466,7 +428,7 @@ class MainWindow(QMainWindow):
         process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self.cancel_path = ROOT / "outputs" / "tasks" / f"{uuid4().hex}.cancel"
         self.cancel_path.parent.mkdir(parents=True, exist_ok=True)
-        if command in ("train", "cross-validate", "refit", "predict-seismic", "prepare-seismic-view", "predict-wells"): extra = [*extra, "--cancel-file", str(self.cancel_path)]
+        if command in ("train", "cross-validate", "refit", "predict-seismic", "prepare-seismic-view", "predict-wells",'traditional-trend','traditional-predict'): extra = [*extra, "--cancel-file", str(self.cancel_path)]
         process.readyReadStandardOutput.connect(self.read_output)
         process.finished.connect(self.task_finished)
         process.errorOccurred.connect(self.process_error)
@@ -521,12 +483,21 @@ class MainWindow(QMainWindow):
                     self.presentation_failed = True; self.log.appendPlainText(f"切片载入失败：{exc}")
             if (self.task_command in (None, "train", "refit")) and not event.get("smoke", True) and artifact in (None, "final_model"):
                 self.bundle_path.setText(event["path"]); self.seismic_bundle.setText(event["path"])
+            if artifact in ('traditional_trend','traditional_prediction'):
+                try:self.traditional.load_result(event['path'],artifact)
+                except Exception as exc:
+                    self.presentation_failed=True;self.log.appendPlainText('传统方法成果载入失败：'+str(exc))
             try:
-                if artifact not in ("seismic_trial", "seismic_view", "seismic_volume", "seismic_index"): self.charts.load_directory(event["path"])
+                if artifact not in ("seismic_trial", "seismic_view", "seismic_volume", "seismic_index",'traditional_trend','traditional_prediction'): self.charts.load_directory(event["path"])
             except (ValueError, OSError): pass
+            if artifact not in ('seismic_index','seismic_view'):
+                try:self.shell.persist_workspace();self.shell.refresh_map_sources()
+                except OSError as exc:self.log.appendPlainText('成果已生成，但项目关联保存失败：'+str(exc))
         elif kind == "fold_started":
             self.cv_fold = event["fold"]; self.cv_folds = event["folds"]
             self.log.appendPlainText(f"留一井验证 {event['fold']}/{event['folds']}：留出 {event['validation_well']}")
+        elif kind == 'traditional_progress':
+            self.progress.setRange(0,event['total']);self.progress.setValue(event['completed'])
         elif kind == "seismic_progress":
             self.progress.setRange(0, event["total"]); self.progress.setValue(event["completed"])
             phase = {"predict": "预测", "verify": "输出校验", "index": "成果索引"}.get(event.get("phase"), "处理")
@@ -545,6 +516,7 @@ class MainWindow(QMainWindow):
         self.status.setText("任务已取消，未完成成果不可用于预测。" if self.cancel_requested else ("任务完成，详细结果见日志和成果目录。" if code == 0 else "任务失败，请查看日志。"))
         self.cancel_button.setEnabled(False)
         for button in self.actions: button.setEnabled(True)
+        self.traditional.update_trend()
         if self.cancel_path and self.cancel_path.exists(): self.cancel_path.unlink()
 
     def process_error(self, error):
@@ -562,6 +534,7 @@ class MainWindow(QMainWindow):
             self.status.setText("请等待当前任务结束后关闭窗口。"); event.ignore()
         else:
             self.shell.timer.stop()
+            self.shell.workspace.shutdown()
             self.library.stop();self.shell.curve_viewer.stop()
             self.train_files.stop_worker();self.well_prediction.log_files.stop_worker();self.well_prediction.point_files.stop_worker()
             self.geometry_timer.stop()

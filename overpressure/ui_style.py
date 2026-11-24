@@ -1,6 +1,7 @@
 """Shared layout and appearance primitives. Contains no data or task logic."""
 from PySide6.QtCore import Qt,Signal,QEvent,QObject,QTimer
 from shiboken6 import isValid
+from .plot_frame import ResizablePlot
 from PySide6.QtWidgets import (QFrame, QLabel, QWidget, QVBoxLayout, QHBoxLayout,QGridLayout,QFormLayout,
     QLayout, QLineEdit, QComboBox, QAbstractSpinBox, QSizePolicy, QPushButton,QAbstractScrollArea,QScrollArea,QMainWindow,QStackedWidget,QToolBar,QSplitter,QApplication,QTabWidget)
 
@@ -32,7 +33,7 @@ class Card(QFrame):
 def polish_layouts(root):
     """Normalize existing nested layouts without reconnecting controls or signals."""
     for layout in root.findChildren(QLayout):
-        if not isValid(layout): continue
+        if not isValid(layout) or layout.property("preserveMargins"): continue
         parent=layout.parent()
         if not isValid(layout):continue
         if type(layout) not in (QVBoxLayout,QHBoxLayout,QGridLayout,QFormLayout):continue
@@ -68,40 +69,35 @@ def polish_layouts(root):
         button.setSizePolicy(QSizePolicy.Policy.Minimum,QSizePolicy.Policy.Fixed)
 
 
-class AspectPreview(QWidget):
-    """Fit the plot within the available space while preserving its chosen ratio."""
+class AspectPreview(ResizablePlot):
+    """Mouse-resizable preview with independent, fixed export dimensions."""
     heightRequired=Signal(int)
     def __init__(self,canvas):
-        super().__init__(); self.canvas=canvas; self.ratio=18/13;self.width_inches=18/2.54;self.preview_mode='fit'
-        self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
-        layout=QVBoxLayout(self); layout.setContentsMargins(0,0,0,0)
-        layout.addWidget(canvas,1)
-        canvas.setMinimumSize(0,0)
-        canvas.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
+        super().__init__(canvas)
+        self.width_inches=18/2.54;self.preview_mode='fit';self._configured_size=None
 
     def set_plot_size(self,width_cm,height_cm):
-        self.ratio=width_cm/height_cm;self.width_inches=width_cm/2.54;self.update_minimum();self.fit()
+        size=(float(width_cm),float(height_cm))
+        changed=size!=self._configured_size
+        self._configured_size=size;self.width_inches=size[0]/2.54
+        if changed:self.restore(size[0]/size[1])
+        else:self.refresh_size()
 
     def set_preview_mode(self,mode):
-        # Legacy page/actual requests must not enlarge the desktop viewport.
-        self.preview_mode='fit';self.update_minimum();self.fit()
+        # Legacy modes cannot enlarge the viewport or reset mouse adjustments.
+        self.preview_mode='fit';self.setMinimumSize(0,0);self.refresh_size()
 
-    def update_minimum(self):
-        self.setMinimumSize(0,0)
+    def restore_configured(self):
+        width,height=self._configured_size or (18.,13.)
+        self.restore(width/height)
 
-    def resizeEvent(self,event):
-        super().resizeEvent(event);self.fit()
-
-    def fit(self):
-        available_width=max(1,self.width());available_height=max(1,self.height())
-        width,height=available_width,available_height
-        if width/height>self.ratio:width=height*self.ratio
-        else:height=width/self.ratio
-        left=max(0,int((available_width-width)/2));top=max(0,int((available_height-height)/2))
-        self.layout().setContentsMargins(left,top,left,top)
-        self.canvas.figure.set_dpi(max(1,min(160,width/self.width_inches)))
-        self.heightRequired.emit(0)
-        self.layout().invalidate()
+    def refresh_size(self):
+        super().refresh_size()
+        canvas=self.canvas;figure=canvas.figure;dpr=canvas.device_pixel_ratio
+        dpi=max(1,min(160,max(1,canvas.width())/getattr(self,'width_inches',18/2.54)))*dpr
+        figure.set_dpi(dpi)
+        figure.set_size_inches(max(1,canvas.width())*dpr/dpi,max(1,canvas.height())*dpr/dpi,forward=False)
+        canvas.draw_idle();self.heightRequired.emit(0)
 
 
 class PageScroll(QScrollArea):

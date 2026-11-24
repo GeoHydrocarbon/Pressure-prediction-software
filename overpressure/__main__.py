@@ -21,7 +21,7 @@ def write_json(path: Path, value) -> None:
 
 def audit(project_path, wells_only=False) -> tuple[Path, dict]:
     project = load_project(project_path)
-    TimeDepth(project)  # Validate even when only inspecting wells.
+    if not wells_only:TimeDepth(project)
     print("正在检查井数据与训练/验证划分……", flush=True)
     prepared = prepare_data(project)
     cfg = project.settings
@@ -72,7 +72,7 @@ def main() -> int:
     check = sub.add_parser("audit", help="检查井数据、划分、单位和 SEG-Y")
     check.add_argument("--project", default="project.yaml")
     check.add_argument("--wells-only", action="store_true")
-    fit = sub.add_parser("train", help="训练逐点 MLP")
+    fit = sub.add_parser("train", help="按所选算法训练模型")
     fit.add_argument("--project", default="project.yaml")
     fit.add_argument("--smoke", action="store_true", help="仅做小样本三轮试算，禁止成果用于正式预测")
     fit.add_argument("--cancel-file")
@@ -108,6 +108,11 @@ def main() -> int:
     seismic.add_argument("--cancel-file")
     seismic.add_argument("--full", action="store_true", help="预测全部输入道")
     seismic.add_argument("--block-traces", type=int, default=None)
+
+    for command,help_text in [('traditional-trend','正常压实趋势两点标定'),('traditional-predict','独立 Eaton 井压力预测')]:
+        traditional=sub.add_parser(command,help=help_text)
+        traditional.add_argument('--project',default='project.yaml')
+        traditional.add_argument('--cancel-file')
     args = parser.parse_args()
     try:
         if args.command == "audit":
@@ -118,30 +123,36 @@ def main() -> int:
             path = prepare_index(args.result, args.cancel_file)
             print(json.dumps({"event": "completed", "artifact": "seismic_index", "path": str(path)}, ensure_ascii=False), flush=True)
             return 0
-        from .training import predict_wells, train
+        if args.command in ('traditional-trend','traditional-predict'):
+            from .traditional import analyze_trend,predict_eaton
+            run=analyze_trend if args.command=='traditional-trend' else predict_eaton
+            run(load_project(args.project),cancel_file=args.cancel_file)
+            return 0
+        from .modules.training import train
+        from .modules.wells import predict_wells
         project = load_project(args.project)
         if args.command == "train":
             train(project, smoke=args.smoke, cancel_file=args.cancel_file)
         elif args.command == "cross-validate":
-            from .cross_validation import cross_validate
+            from .modules.training import cross_validate
             cross_validate(project, smoke=args.smoke, cancel_file=args.cancel_file)
         elif args.command == "refit":
-            from .refit import refit
+            from .modules.training import refit
             refit(project, args.cv, smoke=args.smoke, cancel_file=args.cancel_file)
         elif args.command == "predict-seismic":
+            from .modules.seismic import predict
             bounds = (args.inline_start,args.inline_end,args.crossline_start,args.crossline_end)
-            if any(v is not None for v in bounds):
-                if any(v is None for v in bounds): raise ValueError('请完整填写 Inline、Crossline 起止线号')
-                from .predict_volume import predict
-                predict(project,args.bundle,full=args.full,line_range=bounds,cancel_file=args.cancel_file,block_traces=args.block_traces)
-                return 0
-            from .seismic import predict_seismic_trial, predict_seismic_volume
-            if args.full: predict_seismic_volume(project, args.bundle, block_traces=args.block_traces, cancel_file=args.cancel_file)
-            else: predict_seismic_trial(project, args.bundle, trace_start=args.trace_start, trace_count=args.trace_count, trace_stride=args.trace_stride, cancel_file=args.cancel_file, block_traces=args.block_traces)
+            if any(v is not None for v in bounds) and any(v is None for v in bounds):
+                raise ValueError('请完整填写 Inline、Crossline 起止线号')
+            predict(project, args.bundle, full=args.full,
+                    line_range=bounds if any(v is not None for v in bounds) else None,
+                    trace_start=args.trace_start, trace_count=args.trace_count,
+                    trace_stride=args.trace_stride, cancel_file=args.cancel_file,
+                    block_traces=args.block_traces)
         else:
             if args.generic:
                 if args.blind_only: raise ValueError("通用预测与旧版盲井筛选不能同时使用")
-                from .well_workflow import predict_new_wells
+                from .modules.wells import predict_new_wells
                 predict_new_wells(project, args.bundle, cancel_file=args.cancel_file)
             else: predict_wells(project, args.bundle, blind_only=args.blind_only)
         return 0

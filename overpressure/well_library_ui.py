@@ -117,12 +117,13 @@ class WellLibrary:
         for name in dict.fromkeys([*features,*names]):
             if name=='Pp':continue
             item=QListWidgetItem(name);item.setFlags(item.flags()|Qt.ItemFlag.ItemIsUserCheckable);item.setCheckState(Qt.CheckState.Checked if name in features else Qt.CheckState.Unchecked);self.feature_list.addItem(item)
-        pressure_names=list(dict.fromkeys(c['name'] for well in self.wells for c in well['curves'] if c.get('role')!='measurement' and c.get('unit') in UNITS['Pp']))
+        pressure_names=list(dict.fromkeys(c['name'] for well in self.wells for c in well['curves'] if c.get('role') not in ('measurement','derived') and c.get('unit') in UNITS['Pp']))
         self.target.addItems(pressure_names);self.target.setCurrentText(target)
         self.target.setPlaceholderText('请先导入压力目标曲线（MPa / kPa / psi）')
         self.loading=False;self.training_card.setVisible(self.active)
         self.selection_changed()
         if hasattr(self.owner,'well_prediction'):self.owner.well_prediction.refresh_library()
+        if hasattr(self.owner,'traditional'):self.owner.traditional.refresh_library()
         if hasattr(self.owner,'shell'):self.owner.shell.signature=None;self.owner.shell.refresh_tree()
     def selection_changed(self,*_):
         if self.loading:return

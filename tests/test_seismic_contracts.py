@@ -19,7 +19,7 @@ class SeismicContractTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.folder = Path(self.tmp.name)
         cfg = yaml.safe_load((ROOT / "project.yaml").read_text(encoding="utf-8"))
-        cfg['seismic']['header_fields'].update(inline=21, crossline=1)
+        cfg['seismic']['header_fields'].update(inline=21, crossline=1, x=73, y=77)
         cfg["seismic"].update(density_file="density.sgy", impedance_file="ip.sgy")
         cfg["time_depth"].update(coefficients=[100, 1000], valid_time_range=[0, 1])
         self.project = Project(self.folder / "project.yaml", cfg)

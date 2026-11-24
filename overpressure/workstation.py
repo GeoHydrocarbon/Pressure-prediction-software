@@ -5,17 +5,21 @@ from PySide6.QtCore import Qt, QTimer, QUrl, QSize,QItemSelectionModel
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,
     QTabWidget,QDockWidget,QTreeWidget,QTreeWidgetItem,QStackedWidget,QScrollArea,
-    QProgressBar,QToolBar,QToolButton,QStyle,QSizePolicy,QMenu,QMessageBox,QBoxLayout,QFormLayout,QDialog,QDialogButtonBox,QAbstractItemView,QFileDialog)
+    QProgressBar,QToolBar,QToolButton,QStyle,QSizePolicy,QMenu,QMessageBox,QBoxLayout,QFormLayout,QDialog,QDialogButtonBox,QAbstractItemView,QFileDialog,QLineEdit,QSpinBox,QComboBox)
+from .modules.catalog import MODULES, module_for_page
 
 
 class DocumentTabs(QTabWidget):
-    TITLES=['井曲线','模型训练','时深关系','井预测与验证','成果图表','地震预测','地震切片']
+    TITLES=['井曲线','模型训练','时深关系','井预测与验证','成果图表','三维地震预测','地震切片','传统压力预测']
     def __init__(self):
         super().__init__();self.setObjectName('documents');self.setDocumentMode(True)
         self.setUsesScrollButtons(True);self.setMinimumSize(0,0)
         self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
     def addWidget(self,widget):
-        return self.addTab(widget,self.TITLES[self.count()])
+        index=self.addTab(widget,self.TITLES[self.count()])
+        module=module_for_page(index)
+        if module:self.setTabToolTip(index,module.title+'模块 · '+self.TITLES[index])
+        return index
 
 
 class ParameterColumns(QWidget):
@@ -51,6 +55,7 @@ def vertical_controls(widget):
 class WorkstationShell:
     def __init__(self,window):
         self.w=window;self.results=[];self.signature=None;self.parameter_user_visible=True
+        self.extra_volumes=[];self.map_signature=None;self.saved_map_state={}
         for panel in (window.train_files,window.well_prediction.log_files,window.well_prediction.point_files):
             panel.list.setMaximumHeight(135)
         self.project_key=str(window.project.path.resolve())
@@ -104,6 +109,8 @@ class WorkstationShell:
         window.status.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);window.statusBar().addWidget(window.status,1)
         window.project_label=QLabel(window.project.path.name);window.project_label.setObjectName('projectPath');window.project_label.setToolTip(str(window.project.path))
         window.statusBar().addPermanentWidget(window.project_label)
+        from .workspace_views import WorkspaceViews
+        self.workspace=WorkspaceViews(self)
         self.build_menus()
         window.pages.currentChanged.connect(self.page_changed)
         self.parameter_dock.visibilityChanged.connect(self.parameter_visibility)
@@ -149,6 +156,7 @@ class WorkstationShell:
             return
         self.w.nav.setCurrentRow(index)
         self.w.pages.setCurrentIndex(index)
+        self.workspace.show_page(index)
         if tab is not None:self.w.data_tabs.setCurrentIndex(tab)
 
     def open_time_depth(self,method=None):
@@ -170,33 +178,38 @@ class WorkstationShell:
 
     def build_menus(self):
         w=self.w;bar=w.menuBar()
-        project=bar.addMenu('项目(&P)');data=bar.addMenu('数据(&D)');model=bar.addMenu('模型(&M)')
-        predict=bar.addMenu('预测(&R)');view=bar.addMenu('视图(&V)')
+        project=bar.addMenu('项目(&P)');data=bar.addMenu('数据(&D)')
+        self.module_actions={}
+        for spec in MODULES:
+            if spec.key=='results':
+                results=bar.addMenu(spec.title)
+            else:
+                self.module_actions[spec.key]=self.action(bar,spec.title,lambda page=spec.pages[0]:self.show_page(page))
+        view=bar.addMenu('视图(&V)')
+        self.action(project,'新建项目…',w.new_project,'Ctrl+N',guard=True)
         opened=self.action(project,'打开项目…',w.open_project,'Ctrl+O',QStyle.StandardPixmap.SP_DirOpenIcon,True)
         saved=self.action(project,'保存项目设置',w.save_settings,'Ctrl+S',QStyle.StandardPixmap.SP_DialogSaveButton,True)
+        self.action(project,'项目另存为…',w.save_project_as,'Ctrl+Shift+S',guard=True)
         outputs=self.action(project,'成果目录',w.open_outputs,icon=QStyle.StandardPixmap.SP_DirIcon)
         project.addSeparator();self.action(project,'退出',w.close,'Alt+F4')
         imports=data.addMenu('导入数据')
+        self.action(imports,'地震体 SEG-Y（显示 / 拉剖面）…',self.import_seismic,guard=True)
         self.action(imports,'井与测井曲线…',w.library.import_files,guard=True)
         self.action(imports,'实测压力点…',lambda:w.library.import_files(measured=True),guard=True)
         for title,kind in [('井口坐标…','coordinates'),('井轨迹…','trajectory'),('井震对比曲线…','curves')]:
             self.action(imports,title,lambda k=kind:self.import_asset(k),guard=True)
         imports.addSeparator()
         self.action(imports,'地震输入与单位…',lambda:self.show_page(0,1))
-        self.action(imports,'层位文件…',w.catalog.add_horizon,guard=True)
         data.addSeparator()
         self.action(data,'层位文件管理…',lambda:self.show_page(0,2))
         self.action(data,'检查井数据与地震对应关系',lambda:w.start_task('audit',[]),guard=True)
-        self.action(model,'检查所选训练井与曲线',lambda:w.start_task('audit',['--wells-only']),guard=True)
-        self.action(model,'开始当前模式训练 / 验证',w.training_button.click,guard=True)
-        self.action(model,'最终模型重训设置…',lambda:(self.show_page(1),w.advanced_toggle.setChecked(True)))
-        self.action(predict,'开始井预测与验证',w.well_prediction.start_button.click,guard=True)
-        predict.addSeparator()
-        self.action(predict,'按设置范围预测地震',w.seismic_range_button.click,guard=True)
-        self.action(predict,'预测全部地震',w.seismic_full_button.click,guard=True)
-        # Keep keyboard navigation without repeating document tabs in the menus.
-        self.action(w,'地震切片',lambda:self.show_page(6),'Ctrl+6')
-        self.action(w,'成果图表',lambda:self.show_page(4),'Ctrl+5')
+        self.action(results,'井曲线',lambda:self.show_page(0),'Ctrl+1')
+        self.action(results,'成果图表',lambda:self.show_page(4),'Ctrl+5')
+        self.action(results,'地震切片',lambda:self.show_page(6),'Ctrl+6')
+        self.action(results,'项目底图 Map',self.workspace.show_map,'Ctrl+M')
+        windows=bar.addMenu('窗口(&W)')
+        self.action(windows,'平铺绘图窗口',self.workspace.tile)
+        self.action(windows,'层叠绘图窗口',self.workspace.area.cascadeSubWindows)
         view.addAction(self.project_dock.toggleViewAction());view.addAction(self.task_dock.toggleViewAction())
         self.parameter_action=QAction('显示参数面板',w);self.parameter_action.setCheckable(True);self.parameter_action.setChecked(True)
         self.parameter_action.triggered.connect(self.toggle_parameters);view.addAction(self.parameter_action)
@@ -207,6 +220,8 @@ class WorkstationShell:
         import_button=QToolButton();import_button.setText('导入数据');import_button.setIcon(w.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
         import_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon);import_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);import_button.setMenu(imports)
         toolbar.addWidget(import_button);toolbar.addAction(outputs)
+        toolbar.addSeparator();self.action(toolbar,'底图 Map',self.workspace.show_map)
+        self.action(toolbar,'平铺窗口',self.workspace.tile)
 
     def page_changed(self,index):
         if index in self.parameter_pages:
@@ -252,14 +267,124 @@ class WorkstationShell:
         if key!=self.project_key:
             self.results=[];self.project_key=key
             self.curve_viewer.reset()
+            self.workspace.reset_project()
+        state=self.w.settings.get('workspace',{})
+        self.results=list(state.get('results',[]))
+        self.extra_volumes=list(state.get('seismic_volumes',[]))
+        self.saved_map_state=dict(state.get('map',{}))
+        for attr,key in [('bundle_path','well_model'),('seismic_bundle','seismic_model'),('refit_cv','refit_cv')]:
+            getattr(self.w,attr).setText(state.get(key,''))
+        self.map_signature=None
         self.signature=None;self.refresh_tree()
 
     def register_result(self,event):
+        if self.w.task_command=='cross-validate' and event.get('artifact') is None:return
         artifact=event.get('artifact') or ('final_model' if self.w.task_command in ('train','refit',None) else self.w.task_command)
         if artifact in ('audit','seismic_index','seismic_view'):return
         record={'path':event['path'],'artifact':artifact,'smoke':event.get('smoke',False)}
         if record not in self.results:self.results.append(record)
         self.signature=None;self.refresh_tree()
+
+    def workspace_settings(self):
+        panel=self.workspace.map
+        map_state=dict(source=(panel.dataset.currentData() or {}).get('path',''),coordinates=panel.coordinates.currentData(),
+                       time_ms=panel.time.value(),time_slice=panel.attribute.isChecked(),equal_scale=panel.equal_scale.isChecked(),
+                       sections=[dict(record,view_id=key) for key,record in list(panel.paths.items())[:64]])
+        return dict(results=self.results,seismic_volumes=self.extra_volumes,
+                    well_model=self.w.bundle_path.text().strip(),seismic_model=self.w.seismic_bundle.text().strip(),
+                    refit_cv=self.w.refit_cv.text().strip(),map=map_state)
+
+    def persist_workspace(self):
+        """Persist completed artifacts without collecting partially edited parameters."""
+        from copy import deepcopy
+        import yaml
+        from .config import Project
+        cfg=deepcopy(self.w.settings);cfg['workspace']=deepcopy(self.workspace_settings())
+        cfg.setdefault('project_data',{})['pressure_result']=self.w.pressure_result.text().strip()
+        cfg['project_data']['wells']=deepcopy(self.w.library.wells)
+        cfg['traditional_prediction']=self.w.traditional.collect()
+        temp=self.w.project.path.with_suffix('.yaml.tmp')
+        temp.write_text(yaml.safe_dump(cfg,allow_unicode=True,sort_keys=False),encoding='utf-8')
+        temp.replace(self.w.project.path)
+        self.w.settings=cfg;self.w.project=Project(self.w.project.path,cfg)
+
+    def map_sources(self):
+        w=self.w;headers={key:edit.value() for key,edit in w.header_edits.items()}
+        sources=[]
+        for name,edit,unit in [('密度',w.den_path,w.den_unit.currentText()),('波阻抗',w.ip_path,w.ip_unit.currentText())]:
+            if edit.text().strip():sources.append(dict(label=name+' · '+Path(edit.text().strip()).name,path=str(w.project.resolve(edit.text().strip())),unit=unit,positive_only=True))
+        sources.extend(dict(item,path=str(w.project.resolve(item['path']))) for item in self.extra_volumes)
+        for result in self.results:
+            if result['artifact'] in ('seismic_volume','seismic_trial'):
+                sources.append(dict(path=result['path'],label='预测压力 · '+Path(result['path']).name,unit='MPa'))
+        if w.pressure_result.text().strip():
+            path=str(w.project.resolve(w.pressure_result.text().strip()))
+            sources.append(dict(path=path,label='预测压力 · '+Path(path).name,unit='MPa'))
+        unique={}
+        assets=[]
+        for asset in w.catalog.assets:
+            if asset.get('kind')=='coordinates':assets.append(dict(asset,path=str(w.project.resolve(asset['path']))))
+        for item in sources:
+            item=dict(item);item.setdefault('headers',headers);item.setdefault('time_convention',w.seismic_convention.currentText())
+            item['well_assets']=assets;item['well_max_distance']=w.catalog.distance.value()
+            unique.setdefault(item['path'],item)
+        return list(unique.values())
+
+    def refresh_map_sources(self):
+        sources=self.map_sources();signature=json.dumps(sources,sort_keys=True,ensure_ascii=False)
+        if signature!=self.map_signature:
+            self.map_signature=signature
+            selected={'path':self.saved_map_state.get('source','')} if self.workspace.map.desired_config is None and self.saved_map_state else None
+            self.workspace.map.set_datasets(sources,selected)
+
+    def restore_map_state(self,metadata):
+        state=self.saved_map_state
+        if not state or str(self.w.project.resolve(state.get('source','')))!=metadata['path']:return
+        self.saved_map_state={};panel=self.workspace.map
+        if state.get('coordinates')=='lines':panel.coordinates.setCurrentIndex(0)
+        panel.equal_scale.setChecked(state.get('equal_scale',False))
+        panel.time.setValue(state.get('time_ms',panel.time.value()))
+        panel.attribute.setChecked(state.get('time_slice',False))
+        from copy import deepcopy
+        for record in deepcopy(state.get('sections',[])[:64]):
+            if record.get('mode') not in ('inline','crossline','arbitrary','polyline'):continue
+            ident=record.pop('view_id',None)
+            if ident:
+                panel.paths[ident]=record;panel.active_line=ident;panel.request_active_section()
+
+    def edit_seismic_source(self,record):
+        if not record.get('extra_volume'):
+            self.show_page(0,1);return
+        entry=next((item for item in self.extra_volumes if item['path']==record['path']),None)
+        if entry is None:return
+        dialog=QDialog(self.w);dialog.setWindowTitle('地震体显示属性');form=QFormLayout(dialog)
+        label=QLineEdit(entry['label']);unit=QLineEdit(entry.get('unit','Amplitude'))
+        form.addRow('数据名称',label);form.addRow('幅值单位（仅标注，不换算）',unit)
+        convention=QComboBox();convention.addItems(['twt','owt']);convention.setCurrentText(entry.get('time_convention',self.w.seismic_convention.currentText()));form.addRow('时间类型',convention)
+        edits={};headers=entry.get('headers',{key:edit.value() for key,edit in self.w.header_edits.items()})
+        for key,title in [('inline','Inline'),('crossline','Crossline'),('x','X 坐标'),('y','Y 坐标'),('coordinate_scalar','坐标缩放'),('coordinate_units','坐标单位')]:
+            edit=QSpinBox();edit.setRange(1,240);edit.setValue(headers[key]);edits[key]=edit;form.addRow(title+' 道头位置',edit)
+        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
+        if dialog.exec()==QDialog.DialogCode.Accepted:
+            entry.update(label=label.text().strip() or Path(entry['path']).stem,unit=unit.text().strip(),headers={key:edit.value() for key,edit in edits.items()},time_convention=convention.currentText())
+            self.refresh_tree()
+
+    def import_seismic(self):
+        paths,_=QFileDialog.getOpenFileNames(self.w,'导入地震体用于底图与剖面',str(self.w.project.path.parent),'SEG-Y (*.sgy *.segy);;所有文件 (*)')
+        if not paths:return
+        for path in paths:
+            if not any(item['path']==str(Path(path).resolve()) for item in self.extra_volumes):
+                self.extra_volumes.append(dict(path=str(Path(path).resolve()),label=Path(path).stem,unit='Amplitude'))
+        self.signature=None;self.refresh_tree();self.workspace.show_map()
+        self.open_map_source(paths[-1])
+
+    def open_map_source(self,path):
+        self.refresh_map_sources();panel=self.workspace.map;target=str(self.w.project.resolve(path))
+        for i in range(panel.dataset.count()):
+            if panel.dataset.itemData(i)['path']==target:
+                panel.dataset.setCurrentIndex(i);break
+        self.workspace.show_map()
 
     def entries(self):
         w=self.w
@@ -281,7 +406,9 @@ class WorkstationShell:
                 children.append((label+' · '+Path(asset['path']).name,dict(page=0,well=well['name'],path=asset['path'],asset=index)))
             groups['井'].append((well['name'],dict(page=0,well=well['name'],children=children)))
         for name,edit in [('密度',w.den_path),('波阻抗',w.ip_path)]:
-            if edit.text().strip():groups['地震输入'].append((name+' · '+Path(edit.text()).name,dict(page=0,tab=1,path=edit.text().strip())))
+            if edit.text().strip():groups['地震输入'].append((name+' · '+Path(edit.text()).name,dict(path=edit.text().strip(),seismic_source=True)))
+        for item in self.extra_volumes:
+            groups['地震输入'].append((item['label'],dict(path=item['path'],seismic_source=True,extra_volume=True)))
         loaded_sources={str(Path(entry['source']).resolve()) for entry in w.slices.horizon_entries.values()}
         for i,cfg in enumerate(w.catalog.horizons):
             if str(w.project.resolve(cfg['path'])) not in loaded_sources:groups['层位'].append((cfg.get('display_name',Path(cfg['path']).name),dict(page=0,tab=2,path=cfg['path'],horizon=i)))
@@ -299,10 +426,12 @@ class WorkstationShell:
             if result['artifact'] not in ('seismic_index','seismic_view'):paths[result['path']]=result['artifact']
         for path,kind in paths.items():
             if kind=='final_model':continue
-            groups['预测与验证成果'].append((Path(path).name,dict(page=6 if kind in ('seismic_volume','seismic_trial') else 4,path=path,result=kind)))
+            prefix={'traditional_trend':'正常压实趋势 · ','traditional_prediction':'Eaton 预测 · '}.get(kind,'')
+            groups['预测与验证成果'].append((prefix+Path(path).name,dict(page=6 if kind in ('seismic_volume','seismic_trial') else 4,path=path,result=kind)))
         return groups
 
     def refresh_tree(self):
+        self.refresh_map_sources()
         groups=self.entries();signature=json.dumps(groups,ensure_ascii=False,sort_keys=True)
         if signature==self.signature:return
         self.signature=signature
@@ -333,7 +462,16 @@ class WorkstationShell:
                 append(parent,label,record)
 
     def open_item(self,item,*_):
-        record=item.data(0,Qt.ItemDataRole.UserRole) or {};self.show_page(record.get('page',0),record.get('tab'))
+        record=item.data(0,Qt.ItemDataRole.UserRole) or {}
+        if record.get('seismic_source'):
+            self.open_map_source(record['path']);return
+        if record.get('result') in ('seismic_volume','seismic_trial'):
+            self.open_map_source(record['path']);return
+        if record.get('result') in ('traditional_trend','traditional_prediction'):
+            try:self.workspace.open_traditional(self.w.project.resolve(record['path']))
+            except Exception as exc:QMessageBox.warning(self.w,'无法查看传统方法成果',str(exc))
+            return
+        self.show_page(record.get('page',0),record.get('tab'))
         if 'curve' in record:
             well=next((well for well in self.w.library.wells if well['name']==record['well']),None)
             if well is not None:
@@ -380,6 +518,9 @@ class WorkstationShell:
                 action=menu.addAction(f'绘制所选曲线（{len(curves)} 条）',lambda records=curves:self.plot_curve_objects(records))
                 action.setEnabled(len({entry['well'] for entry in curves})==1)
                 action.setToolTip('第一版支持同一口井的多条曲线，共用深度轴。')
+                overlay=menu.addAction(f'叠加所选曲线（{len(curves)} 条）',lambda records=curves:self.plot_curve_objects(records,overlay=True))
+                overlay.setEnabled(len({entry['well'] for entry in curves})==1)
+                overlay.setToolTip('同井曲线叠加在一个图框；相同单位共用横轴，不同单位使用独立横轴。')
                 menu.addSeparator()
         if record.get('group')=='井' or well:
             menu.addAction('导入测井曲线…' if well else '批量导入井与测井曲线…',lambda:self.w.library.import_files(well=well))
@@ -388,8 +529,17 @@ class WorkstationShell:
             menu.addAction('导入井轨迹…',lambda:self.w.library.import_spatial('trajectory',well))
             menu.addSeparator();menu.addAction('选择训练井与曲线',lambda:self.show_page(1))
             menu.addAction('批量井预测与验证',lambda:self.show_page(3));menu.addSeparator()
+            menu.addAction('传统压力预测',lambda:self.open_traditional_for_well(well))
             menu.addAction('井震空间匹配设置…',self.well_matching_settings)
-        if record.get('group')=='地震输入':menu.addAction('地震输入与单位…',lambda:self.show_page(0,1))
+        if record.get('group')=='地震输入':
+            menu.addAction('导入地震体 SEG-Y…',self.import_seismic)
+            menu.addAction('预测属性与道头设置…',lambda:self.show_page(0,1))
+        if record.get('seismic_source'):
+            menu.addAction('显示底图 / 拉剖面',lambda:self.open_map_source(record['path']))
+            menu.addAction('地震属性与道头设置…',lambda:self.edit_seismic_source(record))
+        if record.get('result') in ('seismic_volume','seismic_trial'):
+            menu.addAction('显示底图 / 拉剖面',lambda:self.open_map_source(record['path']))
+            menu.addAction('层位切片与井震对比…',lambda:self.open_pressure_tools(record['path']))
         if record.get('group')=='层位':menu.addAction('导入层位…',self.w.catalog.add_horizon)
         if 'layer' in record or 'horizon' in record:
             menu.addAction('空间插值…',lambda:self.interpolate_horizon_object(record))
@@ -404,14 +554,21 @@ class WorkstationShell:
         if record.get('model'):
             menu.addAction('查看训练图表',lambda:self.open_model_charts(record['path']))
         if 'curve' in record:menu.addAction('曲线属性',lambda:self.curve_properties(record))
-        if any(key in record for key in ('batch','asset','horizon','layer','well')):
+        if any(key in record for key in ('batch','asset','horizon','layer','well','extra_volume')):
             menu.addAction('移除引用（保留原始文件）',lambda:self.remove_reference(record))
 
     def open_model_charts(self,path):
         try:self.w.charts.load_directory(self.w.project.resolve(path));self.show_page(4)
         except Exception as exc:QMessageBox.warning(self.w,'无法查看训练图表',str(exc))
 
-    def plot_curve_objects(self,records):
+    def open_traditional_for_well(self,well):
+        self.show_page(7)
+        if well:self.w.traditional.analysis_well.setCurrentText(well)
+
+    def open_pressure_tools(self,path):
+        self.show_page(6);self.w.slices.result_dir.setText(str(self.w.project.resolve(path)));self.w.slices.load_result()
+
+    def plot_curve_objects(self,records,overlay=False):
         if not records:return
         names={record['well'] for record in records}
         if len(names)!=1:
@@ -421,7 +578,7 @@ class WorkstationShell:
         curves={curve['name']:curve for curve in well['curves']};selected=list(dict.fromkeys(record['curve'] for record in records))
         if any(key not in curves for key in selected):
             QMessageBox.information(self.w,'曲线已更新','部分曲线已移除，请重新选择。');return
-        self.show_page(0);self.curve_viewer.show_curves(name,[curves[key] for key in selected])
+        self.show_page(0);self.curve_viewer.show_curves(name,[curves[key] for key in selected],overlay=overlay)
 
     def interpolate_horizon_object(self,record):
         self.show_page(6)
@@ -448,7 +605,9 @@ class WorkstationShell:
 
     def remove_reference(self,record):
         w=self.w
-        if 'batch' in record:
+        if record.get('extra_volume'):
+            self.extra_volumes=[item for item in self.extra_volumes if item['path']!=record['path']]
+        elif 'batch' in record:
             panel={'训练井文件':w.train_files,'预测井文件':w.well_prediction.log_files,'实测压力点':w.well_prediction.point_files}[record['batch']]
             for i,path in enumerate(panel.all_files()):
                 if path==record['path']:panel.list.setCurrentRow(i);panel.remove();break

@@ -32,6 +32,7 @@ class WellPredictionPanel(QWidget):
         hint = QLabel('有单独实测点时仅用这些点验证，否则使用井中压力曲线；无标签时只预测。');hint.setObjectName('hint')
         hint.setWordWrap(True); form.addWidget(hint)
         self.independent = QCheckBox('确认实测点未参与训练或调参');self.independent.setToolTip('用于声明验证测点的独立性；参与训练的井仍根据模型记录标为复核。'); form.addWidget(self.independent)
+        self.library_list.itemChanged.connect(lambda:self.independent.setChecked(False))
         layout.addWidget(basic)
         toggle = QCheckBox("字段、单位与深度匹配设置（默认映射不符时展开）");self.mapping_toggle=toggle; layout.addWidget(toggle)
         self.advanced = QWidget(); advanced = QVBoxLayout(self.advanced); advanced.setContentsMargins(0, 0, 0, 0)
@@ -93,6 +94,7 @@ class WellPredictionPanel(QWidget):
     def refresh_library(self,selected=None):
         if not hasattr(self.owner,'library'):return
         active=self.owner.library.active
+        self.independent.setChecked(False)
         self.library_box.setVisible(active);self.log_files.setVisible(not active);self.point_files.setVisible(not active)
         self.mapping_toggle.setVisible(not active)
         if active:self.advanced.hide()

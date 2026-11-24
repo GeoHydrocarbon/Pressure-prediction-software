@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineE
 from .horizon_layers import add_layers
 from .ui_style import Card,polish_layouts,AspectPreview,bound_plot_dialog
 from .charts import seismic_figure,FigureStyle,apply_typography
+from .plot_frame import PlotResizeControls
 from .plot_settings import TypographyControls,link_dimensions
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
@@ -119,7 +120,9 @@ class SlicePanel(QWidget):
         self.preview.setMinimumSize(0,0);self.preview.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Ignored)
         self.aspect_preview.set_plot_size(self.image_width_cm,self.image_height_cm)
         self.aspect_preview.set_preview_mode(self.preview_mode)
-        plot_layout.addWidget(self.toolbar); plot_layout.addWidget(self.preview, 1)
+        self.preview_controls=PlotResizeControls(self.aspect_preview,'slice',self)
+        self.preview_controls.lock.toggled.connect(self.set_preview_lock)
+        plot_layout.addWidget(self.toolbar);plot_layout.addWidget(self.preview_controls);plot_layout.addWidget(self.preview,1)
         self.mode.currentIndexChanged.connect(self.update_positions)
         self.position.currentIndexChanged.connect(self.position_changed)
         self.slider.valueChanged.connect(self.slider_changed)
@@ -131,6 +134,9 @@ class SlicePanel(QWidget):
         self.control_tabs.currentChanged.connect(self.update_settings_height)
         self.layer_selected()
         self.update_sampling_controls()
+
+    def set_preview_lock(self,checked):
+        self.image_ratio_locked=bool(checked);self.aspect_preview.lock_ratio=bool(checked)
 
     def update_settings_height(self,index):
         if index==1:
@@ -272,7 +278,6 @@ class SlicePanel(QWidget):
                 figure.axes[0].legend();apply_typography(figure,self.plot_style)
         self.aspect_preview.set_plot_size(self.image_width_cm,self.image_height_cm)
         self.aspect_preview.set_preview_mode(self.preview_mode)
-        figure.set_size_inches(max(1,self.canvas.width())/figure.dpi,max(1,self.canvas.height())/figure.dpi,forward=False)
         self.toolbar.update(); self.canvas.draw_idle()
         fresh = not self.remote or (not self.reader_busy and self.pending_request is None)
         self.export_button.setEnabled(fresh); self.settings_button.setEnabled(fresh)
@@ -569,8 +574,8 @@ class SlicePanel(QWidget):
         size_form.addRow('图片宽度 (cm)',width);size_form.addRow('图片高度 (cm)',height)
         dpi=QSpinBox();dpi.setObjectName('slice_dpi');dpi.setRange(72,600);dpi.setValue(self.image_dpi);size_form.addRow('导出分辨率 (DPI)',dpi)
         ratio,lock=link_dimensions(size_form,width,height,dpi,prefix='slice',locked=self.image_ratio_locked)
-        preview_mode=QLabel('自动等比例完整显示');preview_mode.setObjectName('slice_preview_mode');size_form.addRow('屏幕预览',preview_mode)
-        hint = QLabel('预览按当前绘图区自动等比例缩放，完整显示，无需滚动；导出仍使用指定图宽、图高及 DPI。坐标范围按切片方向保存；色标及图片比例适用于各切片方向和沿层位图，不改变预测数据。恢复自动范围后点击“应用”。')
+        preview_mode=QLabel('完整显示，可拖动图框调整预览');preview_mode.setObjectName('slice_preview_mode');size_form.addRow('屏幕预览',preview_mode)
+        hint = QLabel('拖动图框边缘或四角可调整预览大小及纵横比，始终限制在绘图区内。“适应窗口”保留当前比例，“恢复设置比例”恢复设置中的宽高比；导出仍使用指定图宽、图高及 DPI。坐标范围按切片方向保存；色标及图片比例适用于各切片方向和沿层位图，不改变预测数据。恢复自动范围后点击“应用”。')
         hint.setWordWrap(True); size_form.addRow(hint)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Close | QDialogButtonBox.StandardButton.RestoreDefaults)
         buttons.button(QDialogButtonBox.StandardButton.Apply).setText("应用")
@@ -594,7 +599,8 @@ class SlicePanel(QWidget):
             self.color_limits = None if auto_color.isChecked() else (low.value(), high.value()); self.cmap = cmap.currentText()
             self.image_width_cm=width.value();self.image_height_cm=height.value();self.image_dpi=dpi.value()
             self.plot_style=style
-            self.preview_mode='fit';self.image_ratio_locked=lock.isChecked();self.refresh_display()
+            self.preview_mode='fit';self.image_ratio_locked=lock.isChecked()
+            self.preview_controls.lock.setChecked(self.image_ratio_locked);self.set_preview_lock(self.image_ratio_locked);self.refresh_display()
         buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(apply)
         buttons.button(QDialogButtonBox.StandardButton.RestoreDefaults).clicked.connect(lambda: (automatic.setChecked(True), auto_color.setChecked(True)))
         buttons.rejected.connect(dialog.reject)

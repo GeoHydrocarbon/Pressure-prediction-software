@@ -17,10 +17,11 @@ def main():
     worker = app_dir / 'PressureWorker.exe'
     gui = app_dir / 'PressurePrediction.exe'
     root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0,str(root))
     with tempfile.TemporaryDirectory(prefix='pressure_release_') as temp:
         folder = Path(temp) / '中文 项目'
         folder.mkdir()
-        cfg = yaml.safe_load((root / 'project.example.yaml').read_text(encoding='utf-8'))
+        cfg = yaml.safe_load((app_dir / '_internal' / 'project.example.yaml').read_text(encoding='utf-8'))
         cfg['data']['training_selection'] = 'checked_files'
         cfg['training'].update(epochs=2, patience=2, batch_size=32)
         cfg['algorithm']['hidden_sizes'] = [8]
@@ -86,11 +87,43 @@ def main():
         assert any(event.get('event')=='ready' for event in events)
         assert any(event.get('event')=='slice' for event in events), messages
         assert not any(event.get('event')=='error' for event in events), messages
+        browser_requests=[dict(command='open',id='open',config=dict(path=str(seismic),headers=cfg['seismic']['header_fields'],unit='Amplitude')),
+                          dict(command='section',id='section',view_id='test',mode='inline',position=10),dict(command='close')]
+        messages=run('overpressure.browser_worker',['--cache',str(folder/'browser_cache')],
+                     '\n'.join(map(json.dumps,browser_requests))+'\n')
+        browser_events=[json.loads(line) for line in messages.splitlines() if line.startswith('{')]
+        assert any(event.get('event')=='section' for event in browser_events),messages
+        assert not any(event.get('event')=='error' for event in browser_events),messages
+        from overpressure.well_library import inspect_curve_file
+        cfg['project_data']['wells']=inspect_curve_file(files[0],well_column='井')
+        from overpressure.traditional import defaults,two_point_trend
+        trend=two_point_trend([[100.,4.5],[200.,4.4]])
+        cfg['traditional_prediction']=dict(defaults({}),analysis_well='Synthetic_0',analysis_min=100.,analysis_max=200.,
+            wells=['Synthetic_0'],applied_trends={'Synthetic_0':dict(trend,confirmed=True)})
+        project.write_text(yaml.safe_dump(cfg,allow_unicode=True),encoding='utf-8')
+        run('overpressure',['traditional-trend','--project',str(project)])
+        run('overpressure',['traditional-predict','--project',str(project)])
+        reports=list((folder/'outputs'/'traditional').rglob('traditional.json'))
+        assert len(reports)==2
+        for path in reports:assert json.loads(path.read_text(encoding='utf-8'))['status']=='completed'
         report = folder/'gui.json'
         result = subprocess.run([str(gui),'--gui-smoke',str(report)],env=env,cwd=folder,timeout=60)
-        if result.returncode or not report.exists(): raise RuntimeError('Packaged GUI did not start')
-        assert json.loads(report.read_text(encoding='utf-8'))['gui']=='passed'
-        print('Packaged training, SEG-Y inference, geometry, slice reader and GUI smoke tests passed')
+        if result.returncode or not report.exists():
+            detail=report.read_text(encoding='utf-8') if report.exists() else 'No report'
+            raise RuntimeError('Packaged GUI did not pass: '+detail)
+        gui_report=json.loads(report.read_text(encoding='utf-8'))
+        assert gui_report['gui']=='passed',gui_report
+        for field in ('blank_project','traditional_module','mixed_tracks','curve_styles','legend_settings','reopen_plot'):
+            assert gui_report[field],gui_report
+        if len(sys.argv)>2:
+            reports_dir=Path(sys.argv[2]).resolve();reports_dir.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(report,reports_dir/'packaged_gui.json')
+            shutil.copyfile(report.with_suffix('.png'),reports_dir/'packaged_gui.png')
+            (reports_dir/'packaged_checks.json').write_text(json.dumps(dict(status='passed',gui=gui_report,
+                checks=['CPU training','SEG-Y inference','geometry','slice reader','Map section','traditional trend',
+                        'Eaton prediction','blank GUI','mixed tracks','curve styles','legend settings','reopen plot']),
+                ensure_ascii=False,indent=2),encoding='utf-8')
+        print('Packaged CPU training, SEG-Y, Map section, Eaton, blank GUI, mixed tracks and legend smoke tests passed')
 
 
 if __name__ == '__main__':

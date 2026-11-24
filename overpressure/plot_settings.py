@@ -3,6 +3,30 @@ from PySide6.QtWidgets import QWidget,QFormLayout,QFontComboBox,QDoubleSpinBox,Q
 from .charts import FigureStyle
 
 
+def edit_figure_style(parent, style):
+    """Shared font and export-size editor for standalone scientific plot windows."""
+    from dataclasses import replace
+    from PySide6.QtWidgets import QDialog,QVBoxLayout,QScrollArea,QSpinBox,QDialogButtonBox,QMessageBox
+    from .ui_style import WindowBoundsGuard
+    dialog=QDialog(parent);dialog.setWindowTitle('绘图设置');dialog.resize(480,650)
+    layout=QVBoxLayout(dialog);body=QWidget();form=QFormLayout(body)
+    typography=TypographyControls(style);form.addRow(typography)
+    width,height=QDoubleSpinBox(),QDoubleSpinBox()
+    for widget,value in ((width,style.width_cm),(height,style.height_cm)):
+        widget.setRange(5,50);widget.setValue(value)
+    dpi=QSpinBox();dpi.setRange(72,600);dpi.setValue(style.dpi)
+    form.addRow('导出宽（cm）',width);form.addRow('导出高（cm）',height);form.addRow('DPI',dpi)
+    link_dimensions(form,width,height,dpi)
+    scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(body);layout.addWidget(scroll)
+    buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
+    dialog.screen_guard=WindowBoundsGuard(dialog)
+    if dialog.exec()==QDialog.DialogCode.Accepted:
+        try:return replace(style,**typography.collect(),width_cm=width.value(),height_cm=height.value(),dpi=dpi.value()).validate()
+        except ValueError as exc:QMessageBox.warning(parent,'绘图设置需要修改',str(exc))
+    return None
+
+
 class TypographyControls(QWidget):
     def __init__(self,style,parent=None,default_style=None):
         super().__init__(parent);form=QFormLayout(self)

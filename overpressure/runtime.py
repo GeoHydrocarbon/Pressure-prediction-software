@@ -26,7 +26,7 @@ def default_project() -> Path:
 
 
 def worker_command(module: str, arguments=()) -> tuple[str, list[str]]:
-    if module not in ("overpressure", "overpressure.slice_worker", "overpressure.seismic_geometry"):
+    if module not in ("overpressure", "overpressure.slice_worker", "overpressure.seismic_geometry", "overpressure.browser_worker"):
         raise ValueError(f"Unsupported worker: {module}")
     if getattr(sys, "frozen", False):
         executable = application_root() / "PressureWorker.exe"
