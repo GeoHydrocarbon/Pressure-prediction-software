@@ -40,6 +40,11 @@ class RockPhysicsGuiTests(unittest.TestCase):
         while not predicate() and time.monotonic()<end:self.app.processEvents();QTest.qWait(20)
         self.assertTrue(predicate(),self.panel.status.text())
 
+    def tearDown(self):
+        self.panel.stop()
+        # Complete deferred canvas draws while cleanup still owns the widgets.
+        self.app.processEvents()
+
     def test_switch_preserves_drafts_restore_and_project_state(self):
         p=self.panel;self.assertEqual(p.parameter_values()['M'],[37,20])
         p.parameters.item(0,1).setText('[0.2, 0.8]');p.select_model('Fluid.test');self.assertEqual(p.parameter_values()['kind'],'water')
@@ -51,15 +56,19 @@ class RockPhysicsGuiTests(unittest.TestCase):
         p.parameters.item(0,1).setText('');p.run_model();self.assertIsNone(p.process);self.assertIn('必填',p.status.text())
 
     def test_mineral_curve_field_opens_popup_on_body_click_and_preserves_missing_choice(self):
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt,QEvent,QPointF
+        from PySide6.QtGui import QMouseEvent
         from overpressure.well_rock_physics_panel import CurveSourceCombo
         class ClickProbe(CurveSourceCombo):
             def __init__(self):super().__init__();self.popup_calls=0
             def showPopup(self):self.popup_calls+=1
         # Keep the real Qt body-click dispatch while substituting only the OS
         # popup window, which can terminate Qt on unattended Windows runners.
-        picker=ClickProbe();picker.resize(240,36);picker.set_curves(['QUAZ','LIME'],'QUAZ');picker.show();self.addCleanup(picker.close)
-        self.app.processEvents();QTest.mouseClick(picker,Qt.MouseButton.LeftButton,pos=picker.rect().center());self.app.processEvents()
+        picker=ClickProbe();picker.resize(240,36);picker.set_curves(['QUAZ','LIME'],'QUAZ');self.addCleanup(picker.close)
+        position=QPointF(picker.rect().center())
+        for kind,buttons in [(QEvent.Type.MouseButtonPress,Qt.MouseButton.LeftButton),(QEvent.Type.MouseButtonRelease,Qt.MouseButton.NoButton)]:
+            event=QMouseEvent(kind,position,Qt.MouseButton.LeftButton,buttons,Qt.KeyboardModifier.NoModifier)
+            self.app.sendEvent(picker,event)
         self.assertEqual(picker.popup_calls,1);self.assertFalse(picker.isEditable())
         picker.setCurrentIndex(2)
         self.assertEqual(picker.currentText(),'LIME')
