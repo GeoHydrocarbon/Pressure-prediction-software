@@ -59,7 +59,7 @@ python -m overpressure.gui
 
 GitHub Actions 的 `Windows release` 流程先运行合成数据测试，再使用 PyInstaller 构建 GUI 和计算组件，并在移除开发环境路径后验证打包后的训练和 GUI 启动。
 
-在 Actions 手动运行并勾选 `publish`，或推送版本标签 `v*`，将通过检查的 ZIP 和 SHA256 校验文件发布到 Releases。普通源码推送只运行测试；Windows 打包在手动运行或推送版本标签时执行。版本号来自 `overpressure/__init__.py`。
+在 Actions 手动运行并勾选 `publish`、推送版本标签 `v*`，或向 main 推送提交标题以 `Release ` 开头的发布提交，将通过检查的 ZIP 和 SHA256 校验文件发布到 Releases。普通源码推送只运行测试。发布前需更新 `overpressure/__init__.py` 中的版本号；已有同名 Release 时会拒绝覆盖。
 
 本地构建使用 Windows x64 / Python 3.12：
 
