@@ -8,7 +8,7 @@ import sys
 def main():
     root=Path(__file__).resolve().parents[1];failures=[]
     env=dict(os.environ,PYTHONUTF8='1',PYTHONIOENCODING='utf-8',QT_QPA_PLATFORM='offscreen')
-    for file in sorted((root/'tests').glob('test_*.py')):
+    for file in sorted((root/'tests').glob('test_*.py'),key=lambda p:(p.name!='test_rock_physics_gui.py',p.name)):
         print('\nSource test file: '+file.name,flush=True)
         try:
             result=subprocess.run([sys.executable,'-m','unittest','discover','-s','tests','-p',file.name,'-v'],cwd=root,env=env,timeout=300)
