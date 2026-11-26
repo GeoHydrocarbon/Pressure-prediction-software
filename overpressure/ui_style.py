@@ -94,7 +94,8 @@ class AspectPreview(ResizablePlot):
     def refresh_size(self):
         super().refresh_size()
         canvas=self.canvas;figure=canvas.figure;dpr=canvas.device_pixel_ratio
-        dpi=max(1,min(160,max(1,canvas.width())/getattr(self,'width_inches',18/2.54)))*dpr
+        # Hidden/tiny previews must not render sub-pixel fonts in FreeType.
+        dpi=max(36,min(160,max(1,canvas.width())/getattr(self,'width_inches',18/2.54)))*dpr
         figure.set_dpi(dpi)
         figure.set_size_inches(max(1,canvas.width())*dpr/dpi,max(1,canvas.height())*dpr/dpi,forward=False)
         canvas.draw_idle();self.heightRequired.emit(0)

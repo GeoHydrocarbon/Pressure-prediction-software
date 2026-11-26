@@ -56,9 +56,9 @@ class RockPhysicsGuiTests(unittest.TestCase):
         picker=CurveSourceCombo();picker.resize(240,36);picker.set_curves(['QUAZ','LIME'],'QUAZ');picker.show();self.addCleanup(picker.close)
         self.app.processEvents();QTest.mouseClick(picker,Qt.MouseButton.LeftButton,pos=picker.rect().center());self.app.processEvents()
         self.assertTrue(picker.view().isVisible());self.assertFalse(picker.isEditable())
-        target=picker.model().index(2,0)
-        QTest.mouseMove(picker.view().viewport(),picker.view().visualRect(target).center());QTest.qWait(50)
-        QTest.mouseClick(picker.view().viewport(),Qt.MouseButton.LeftButton,pos=picker.view().visualRect(target).center());self.app.processEvents()
+        # Offscreen Windows runners cannot reliably move the native cursor.
+        # Opening still uses a real body click; select the next popup row by key.
+        QTest.keyClick(picker.view(),Qt.Key.Key_Down);QTest.keyClick(picker.view(),Qt.Key.Key_Return);self.app.processEvents()
         self.assertEqual(picker.currentText(),'LIME')
         picker.set_curves(['QUAZ'],picker.currentText());self.assertEqual(picker.currentText(),'LIME')
         picker.setCurrentIndex(0);self.assertEqual(picker.currentText(),'')
