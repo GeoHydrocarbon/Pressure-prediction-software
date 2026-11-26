@@ -74,7 +74,7 @@ def main() -> int:
     check.add_argument("--wells-only", action="store_true")
     fit = sub.add_parser("train", help="按所选算法训练模型")
     fit.add_argument("--project", default="project.yaml")
-    fit.add_argument("--smoke", action="store_true", help="仅做小样本三轮试算，禁止成果用于正式预测")
+    fit.add_argument("--smoke", action="store_true", help="仅做小样本试算（MLP 最多 3 轮，树模型最多 8 棵/轮），禁止成果用于正式预测")
     fit.add_argument("--cancel-file")
     predict = sub.add_parser("predict-wells", help="通用多井预测、稀疏压力点验证或旧版盲井评价")
     predict.add_argument("--project", default="project.yaml")
@@ -108,7 +108,7 @@ def main() -> int:
     seismic.add_argument("--cancel-file")
     seismic.add_argument("--full", action="store_true", help="预测全部输入道")
     seismic.add_argument("--block-traces", type=int, default=None)
-
+        
     for command,help_text in [('traditional-trend','正常压实趋势两点标定'),('traditional-predict','独立 Eaton 井压力预测')]:
         traditional=sub.add_parser(command,help=help_text)
         traditional.add_argument('--project',default='project.yaml')

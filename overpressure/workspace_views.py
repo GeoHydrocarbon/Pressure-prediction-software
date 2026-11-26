@@ -3,7 +3,7 @@ from dataclasses import replace
 import math
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt,Signal
 from PySide6.QtWidgets import (QMdiArea, QMdiSubWindow, QDialog, QWidget, QVBoxLayout,
                               QHBoxLayout, QPushButton, QComboBox, QDoubleSpinBox,
                               QCheckBox, QLabel, QFileDialog, QMessageBox, QFormLayout,
@@ -19,11 +19,13 @@ from .flow_layout import FlowLayout
 
 class SectionPlot(QWidget):
     """A separately zoomable/exportable snapshot, updated when its map line moves."""
+    overlayChanged=Signal(dict)
     def __init__(self):
         super().__init__()
         self.section = None
         self.meta = {}
         self.style = FigureStyle(grid=False)
+        self.overlay_settings=dict(distance=25.,styles={},legend=True)
         layout = QVBoxLayout(self)
         row = FlowLayout()
         self.palette = QComboBox()
@@ -45,6 +47,7 @@ class SectionPlot(QWidget):
         settings = QPushButton('绘图设置…')
         settings.clicked.connect(self.plot_settings)
         row.addWidget(settings)
+        self.overlay_button=QPushButton('叠加显示…');self.overlay_button.clicked.connect(self.overlay_dialog);row.addWidget(self.overlay_button)
         export = QPushButton('导出图件…')
         export.clicked.connect(self.export)
         row.addWidget(export)
@@ -78,7 +81,15 @@ class SectionPlot(QWidget):
             self.high.blockSignals(False)
         self.note.setText(f"{Path(metadata['source']).name} · 时间向下 · 时间抽稀 {metadata['time_stride']} · 空白列 {metadata['missing_columns']}")
         self.note.setToolTip('来源：'+metadata['source']+'\n任意线取最近实际道；无覆盖或无效值处留空，不进行地震数值的空间插值。')
+        if metadata.get('overlay_warnings'):self.note.setText(self.note.text()+'\n'+'\n'.join(metadata['overlay_warnings']))
         self.redraw()
+
+    def overlay_dialog(self):
+        from .section_overlay_dialog import SectionOverlayDialog
+        SectionOverlayDialog(self).exec()
+
+    def set_overlay_settings(self,settings):
+        self.overlay_settings=settings;self.redraw();self.overlayChanged.emit(settings)
 
     def redraw(self, *_):
         self.low.setEnabled(not self.auto.isChecked())
@@ -91,6 +102,8 @@ class SectionPlot(QWidget):
             return
         figure = seismic_figure(self.section, limits, cmap=self.palette.currentText(), style=self.style)
         figure.axes[-1].set_ylabel(self.meta.get('unit') or 'Amplitude')
+        from .section_overlays import render_overlays
+        render_overlays(figure.axes[0],self.meta.get('well_overlays',[]),self.overlay_settings,[self.section.y[0],self.section.y[-1]])
         old = self.canvas.figure
         old.clear()
         self.canvas.figure = figure
@@ -168,6 +181,7 @@ class WorkspaceViews:
         self.module_dialogs = {}
         self.sections = {}
         self.traditional_documents = {}
+        self.rock_physics_documents = {}
         # Existing page controls are retained, but their ownership belongs to a
         # module dialog or a plot document, rather than the central tab bar.
         router = self.owner.takeCentralWidget()
@@ -181,11 +195,11 @@ class WorkspaceViews:
             title = router.tabText(index)
             router.removeTab(index)
             router.insertTab(index, QWidget(), title)
-            if index in (1, 3, 5, 7):
+            if index in (1, 3, 5, 7, 8):
                 dialog = QDialog(self.owner)
                 dialog.setModal(False)
                 dialog.setWindowTitle(title)
-                dialog.resize(850, 760)
+                dialog.resize(1400 if index==8 else 850, 850 if index==8 else 760)
                 layout = QVBoxLayout(dialog)
                 layout.setContentsMargins(8, 8, 8, 8)
                 layout.addWidget(widget)
@@ -251,6 +265,11 @@ class WorkspaceViews:
     def section_ready(self, ident, section, metadata):
         if ident not in self.sections:
             panel = SectionPlot()
+            from copy import deepcopy
+            record=self.map.paths.get(ident,{})
+            panel.overlay_settings=deepcopy(record.get('overlay_settings',panel.overlay_settings))
+            if 'overlay_settings' not in record and metadata.get('coordinate_mode')=='lines':panel.overlay_settings['distance']=.5
+            panel.overlayChanged.connect(lambda settings,key=ident:self.overlay_changed(key,settings))
             sub = self.add_document(section.title, panel)
             self.sections[ident] = sub
             sub.show()
@@ -263,6 +282,17 @@ class WorkspaceViews:
         sub.setWindowTitle(section.title)
         # Updating a dragged line must leave the map active so a drag can continue.
 
+    def overlay_changed(self,ident,settings):
+        record=self.map.paths.get(ident)
+        if record is None:return
+        from .section_overlays import selected_curves
+        from copy import deepcopy
+        panel=self.sections[ident].widget()
+        curves=selected_curves(settings,panel.meta.get('well_overlays',[]))
+        previous=record.get('overlay_curves',[])
+        record['overlay_settings']=deepcopy(settings);record['overlay_curves']=curves
+        if curves!=previous:self.map.request_section(ident,record)
+
     def open_traditional(self,path):
         from .traditional_views import TraditionalResultView
         key=str(Path(path).resolve())
@@ -272,6 +302,21 @@ class WorkspaceViews:
             title='正常压实趋势' if panel.is_trend else 'Eaton 压力预测'
             self.traditional_documents[key]=self.add_document(title+' · '+Path(key).name,panel)
         sub=self.traditional_documents[key];sub.show();self.area.setActiveSubWindow(sub);sub.showMaximized()
+        return sub.widget()
+
+    def open_rock_physics(self,path,result=None):
+        from .rock_physics_view import RockPhysicsResultView
+        key=str(Path(path).resolve())
+        if key not in self.rock_physics_documents:
+            if result is None:
+                import json
+                result=json.loads((Path(key)/'result.json').read_text(encoding='utf-8'))
+            if result.get('kind')=='well_log':
+                from .well_rock_physics_view import WellRockPhysicsResultView
+                panel=WellRockPhysicsResultView(key,result,self.owner)
+            else:panel=RockPhysicsResultView(key,result)
+            self.rock_physics_documents[key]=self.add_document('岩石物理 · '+Path(key).name,panel)
+        sub=self.rock_physics_documents[key];sub.show();self.area.setActiveSubWindow(sub);sub.showMaximized()
         return sub.widget()
 
     def update_traditional_trend(self,path,trend):
@@ -308,6 +353,10 @@ class WorkspaceViews:
 
     def reset_project(self):
         self.map.reset_project()
+        self.owner.rock_physics.stop()
+        for sub in self.rock_physics_documents.values():
+            self.area.removeSubWindow(sub);sub.deleteLater()
+        self.rock_physics_documents.clear()
         for sub in self.traditional_documents.values():
             self.area.removeSubWindow(sub);sub.deleteLater()
         self.traditional_documents.clear()

@@ -109,6 +109,8 @@ def main():
     parser.add_argument('--refresh',action='store_true',help='Refresh only a previously rebuilt staging directory')
     args=parser.parse_args()
     source=args.source.resolve();output=args.output.resolve()
+    if (source/'overpressure'/'rock_physics').is_dir():
+        raise ValueError('This source needs RockPhyPy source/license resources. Use the full windows.spec build; the old offline runtime baseline does not contain these resources.')
     workspace=Path(__file__).resolve().parents[1]
     if not output.is_relative_to(workspace/'outputs'):raise ValueError('Output must stay within workspace outputs')
     actual=digest(args.runtime)

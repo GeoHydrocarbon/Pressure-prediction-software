@@ -46,14 +46,15 @@ class ModuleContractTests(unittest.TestCase):
             self.assertEqual(bundle.features,('DEN','Depth'))
             np.testing.assert_allclose(bundle.predict([[2.4,100],[np.nan,200]],batch_size=1),[4.8,np.nan])
 
-    def test_planned_algorithms_fail_before_creating_outputs(self):
+    def test_tree_algorithms_are_available_but_reject_physics_before_outputs(self):
         with tempfile.TemporaryDirectory() as temp:
             for name in ('rf','xgboost'):
-                cfg=dict(algorithm=dict(name=name),physics=dict(enabled=False),data={})
-                with self.assertRaisesRegex(ValueError,'尚未接入'):
+                cfg=dict(algorithm=dict(name=name),physics=dict(enabled=True,method='eaton_soft_loss'),data={})
+                with self.assertRaisesRegex(ValueError,'物理约束'):
                     train(Project(Path(temp)/'project.yaml',cfg))
             self.assertEqual(list(Path(temp).iterdir()),[])
-        self.assertTrue(capabilities()['rf']['planned'])
+        self.assertFalse(capabilities()['rf']['planned'])
+        self.assertFalse(capabilities()['xgboost']['planned'])
         self.assertFalse(capabilities()['mlp']['planned'])
 
     def test_unknown_model_or_incomplete_package_is_never_loaded(self):
@@ -64,10 +65,11 @@ class ModuleContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,message):ModelBundle(folder)
 
     def test_business_pages_have_unambiguous_modules(self):
-        self.assertEqual([spec.key for spec in MODULES],['training','traditional','wells','seismic','results'])
+        self.assertEqual([spec.key for spec in MODULES],['training','traditional','wells','seismic','rock_physics','results'])
         pages=[page for spec in MODULES for page in spec.pages]
         self.assertEqual(len(pages),len(set(pages)))
         self.assertEqual(module_for_page(1).key,'training')
         self.assertEqual(module_for_page(5).key,'seismic')
         self.assertEqual(module_for_page(7).key,'traditional')
+        self.assertEqual(module_for_page(8).key,'rock_physics')
         self.assertIsNone(module_for_page(2))  # project-owned time-depth relationship

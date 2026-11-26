@@ -93,3 +93,4 @@ class PlotResizeControls(QWidget):
         self.fit_button.clicked.connect(preview.fit)
         self.reset_button.clicked.connect(preview.restore_configured)
         preview.sizeChanged.connect(lambda w,h:self.size_label.setText(f'预览 {w} × {h}'))
+

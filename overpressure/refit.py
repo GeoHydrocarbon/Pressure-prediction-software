@@ -37,7 +37,8 @@ def refit(project: Project, cv_folder, *, smoke=False, cancel_file=None):
     if len(folds) != len(wells) or {row["validation_well"] for row in folds} != set(wells):
         raise ValueError("验证记录没有恰好覆盖每口开发井一次")
     epoch_values = [row["best_epoch"] for row in folds]
-    if any(isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= cfg["training"]["epochs"] for n in epoch_values):
+    from .algorithms.tree_settings import iteration_limit
+    if any(isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= iteration_limit(cfg) for n in epoch_values):
         raise ValueError("各折最佳轮数记录无效")
     audit = audit_wells(project)
     if "development_sha256" in summary:

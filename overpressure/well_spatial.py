@@ -17,12 +17,16 @@ MAX_WELL_VALUES = 8_000_000
 
 def read_asset(asset):
     columns = asset["columns"]
-    raw = read_table(Path(asset["path"]), dtype={columns["well"]: "string"} if columns.get('well') else None)
+    if asset.get('table_import') or Path(asset['path']).suffix.lower()=='.txt':
+        from .spatial_table import read_spatial_table
+        raw=read_spatial_table(asset['path'],asset.get('table_import'))
+    else:
+        raw = read_table(Path(asset["path"]), dtype={columns["well"]: "string"} if columns.get('well') else None)
     mapped=[v for v in columns.values() if v]
-    if len(set(mapped)) != len(mapped): raise ValueError('井名、深度和 XY 字段不能对应同一列')
+    if len(set(mapped)) != len(mapped): raise ValueError('井名、深度、坐标和角度字段不能对应同一列')
     missing = set(mapped)-set(raw.columns)
     if missing: raise ValueError(f"{Path(asset['path']).name} 缺少列：{sorted(missing)}")
-    rows=np.arange(len(raw))+2
+    rows=np.asarray(raw.attrs.get('source_rows',np.arange(len(raw))+2))
     if asset.get('well_name') and columns.get('well'):
         mask=raw[columns['well']].astype('string').str.strip().eq(asset['well_name']).fillna(False).to_numpy();raw=raw.loc[mask];rows=rows[mask]
     if asset.get('excluded_wells') and columns.get('well'):
@@ -31,12 +35,16 @@ def read_asset(asset):
     frame = pd.DataFrame({'well':names.to_numpy(), 'source_row':rows})
     raw=raw.reset_index(drop=True)
     frame['well'] = frame.well.replace('',pd.NA)
-    fields = {"coordinates": ("x", "y"), "trajectory": ("depth", "x", "y"), "curves": ("depth",)}[asset["kind"]]
+    survey=asset['kind']=='trajectory' and asset.get('trajectory_mode')=='survey'
+    fields = ('depth','azimuth','inclination') if survey else {"coordinates": ("x", "y"), "trajectory": ("depth", "x", "y"), "curves": ("depth",)}[asset["kind"]]
     for field in fields:
         if columns[field] not in raw: raise ValueError(f"{Path(asset['path']).name} 缺少 {field} 列")
         values = pd.to_numeric(raw[columns[field]], errors="coerce").to_numpy(dtype=float, na_value=np.nan)
         frame[field] = np.where(np.isfinite(values),values,np.nan)
     if "depth" in frame: frame["depth"] *= unit_factor("Depth", asset.get("depth_unit", "m"))
+    if survey:
+        from .directional_survey import survey_positions
+        frame=survey_positions(frame,asset)
     return raw, frame
 
 
@@ -126,7 +134,7 @@ def prepare_wells(reader, config):
     for number, asset in enumerate(assets):
         raw, frame = read_asset(asset); provenance.append({"kind": asset["kind"], "path": asset["path"], "sha256": sha256_file(Path(asset["path"]))})
         if asset["kind"] == "coordinates": heads.append(frame); continue
-        if asset["kind"] == "trajectory": frame["relative"] = asset.get("relative", False); trajectories.append(frame); continue
+        if asset["kind"] == "trajectory": frame["relative"] = asset.get('trajectory_mode')=='survey' or asset.get("relative", False); trajectories.append(frame); continue
         frame["source_file"] = asset["path"]; frame["asset_id"] = number
         time_column = asset.get("time_column", "")
         if time_column:

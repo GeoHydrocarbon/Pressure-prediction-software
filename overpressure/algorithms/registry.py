@@ -48,8 +48,10 @@ ALGORITHM_SPECS = {
     'mlp': AlgorithmSpec('mlp', 'MLP', ('eaton_soft_loss',),
                          'overpressure.algorithms.mlp_training:train',
                          'overpressure.algorithms.mlp:MLPBundle'),
-    'rf': AlgorithmSpec('rf', 'RF'),
-    'xgboost': AlgorithmSpec('xgboost', 'XGBoost'),
+    'rf': AlgorithmSpec('rf', '随机森林 RF', (),
+                        'overpressure.algorithms.tree_training:train', 'overpressure.algorithms.trees:TreeBundle'),
+    'xgboost': AlgorithmSpec('xgboost', 'XGBoost', (),
+                             'overpressure.algorithms.tree_training:train', 'overpressure.algorithms.trees:TreeBundle'),
 }
 
 

@@ -7,6 +7,7 @@ class SeismicModuleUI:
     def build_seismic(self):
         page = self.page("地震压力预测", "填写 Inline、Crossline 起止线号，预测矩形范围内已有的全部道（包含边界）；也可预测全体。按道分块计算，保留原始时间采样与道头，缺失交点不补道。")
         card=Card('预测模型与空间范围'); form = QFormLayout(card)
+        self.seismic_model_choice = self.combo([]); form.addRow('项目模型', self.seismic_model_choice)
         self.seismic_bundle = self.path_field(form, "正式模型目录", directory=True)
         self.prediction_geometry_label = QLabel(); self.prediction_geometry_label.setWordWrap(True); form.addRow('输入地震线号范围',self.prediction_geometry_label)
         refresh = QPushButton('刷新输入地震线号范围'); refresh.clicked.connect(self.invalidate_seismic_geometry); form.addRow(refresh)
@@ -38,3 +39,4 @@ class SeismicModuleUI:
         extra=['--bundle',self.seismic_bundle.text(),'--block-traces',str(self.block_traces.value())]
         for key,value in values.items():extra.extend(['--'+key.replace('_','-'),str(value)])
         self.start_task('predict-seismic',extra)
+

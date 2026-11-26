@@ -1,10 +1,13 @@
+# 当前数据层与检查工具；实际本机版本见 outputs/environment.json。
 numpy
 pandas
 scipy
 openpyxl
 scikit-learn
+xgboost>=2.0,<4
 PyYAML
 segyio
+# 后续训练与桌面界面。PyTorch GPU 版本需按部署显卡选择。
 torch
 PySide6
 matplotlib

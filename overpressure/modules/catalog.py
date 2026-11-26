@@ -15,6 +15,7 @@ MODULES = (
     ModuleSpec('traditional', '传统压力预测', (7,), ('traditional-trend', 'traditional-predict')),
     ModuleSpec('wells', '井预测与验证', (3,), ('predict-wells',)),
     ModuleSpec('seismic', '三维地震预测', (5,), ('predict-seismic',)),
+    ModuleSpec('rock_physics', '岩石物理建模', (8,)),
     ModuleSpec('results', '成果查看', (0, 4, 6), ('prepare-seismic-view',)),
 )
 

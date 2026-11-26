@@ -24,6 +24,27 @@ class TrainingModuleUI:
         self.lr = self.number(.0000001, 1, 7); form.addRow("学习率", self.lr)
         self.patience = QSpinBox(); self.patience.setRange(1, 10000); form.addRow("早停耐心轮数", self.patience)
         self.seed = QLineEdit(); form.addRow("随机种子（划分与训练）", self.seed)
+        self.training_form=form
+        self.mlp_controls=[self.hidden,self.dropout,self.epochs,self.batch,self.lr,self.patience]
+        self.tree_edits={}
+        from ..algorithms.tree_settings import DEFAULTS
+        titles=dict(n_estimators='树的数量 / 最多提升轮数',max_depth='最大树深度',min_samples_split='分裂节点最少样本数',
+                    min_samples_leaf='叶节点最少样本数',max_features='每次分裂使用特征比例',bootstrap='有放回抽样',n_jobs='并行线程数',
+                    learning_rate='学习率',subsample='每轮样本采样比例',colsample_bytree='每棵树特征采样比例',
+                    min_child_weight='最小子节点权重',reg_alpha='L1 正则化',reg_lambda='L2 正则化',early_stopping_rounds='早停耐心轮数（0 为关闭）')
+        for name,values in DEFAULTS.items():
+            self.tree_edits[name]={}
+            for key,value in values.items():
+                if isinstance(value,bool): edit=QCheckBox();edit.setChecked(value)
+                elif isinstance(value,int):
+                    edit=QSpinBox();edit.setRange(0 if key in ('max_depth','early_stopping_rounds') else 2 if key=='min_samples_split' else 1,64 if key=='n_jobs' else 100000);edit.setValue(value)
+                    if key=='max_depth' and name=='rf':edit.setSpecialValueText('不限制')
+                    if key=='max_depth' and name=='xgboost':edit.setMinimum(1)
+                else:
+                    edit=self.number(.0000001 if key in ('learning_rate','subsample','colsample_bytree','max_features') else 0,
+                                     1 if key in ('learning_rate','subsample','colsample_bytree','max_features') else 100000,7);edit.setValue(value)
+                self.tree_edits[name][key]=edit;form.addRow(titles[key],edit)
+        form.setRowVisible(self.algorithm,False)
         page.addWidget(group)
         physical = Card("可选物理约束");self.training_physics_card=physical; physform = QFormLayout(physical)
         self.physical_enabled = QCheckBox("训练中加入 Eaton 软物理损失")
@@ -51,7 +72,35 @@ class TrainingModuleUI:
         self.button(advanced, "使用全部参与井重训最终模型", lambda: self.start_task("refit", ["--cv", self.refit_cv.text()]))
         page.addWidget(self.advanced_training); self.advanced_training.hide()
         self.advanced_toggle.toggled.connect(self.advanced_training.setVisible)
+        self.algorithm.currentIndexChanged.connect(self.update_algorithm_controls)
+        self.update_algorithm_controls()
         page.addStretch()
+
+    def update_algorithm_controls(self,*_):
+        name=self.algorithm.currentData();is_mlp=name=='mlp'
+        for edit in self.mlp_controls:self.training_form.setRowVisible(edit,is_mlp)
+        for algorithm,edits in self.tree_edits.items():
+            for edit in edits.values():self.training_form.setRowVisible(edit,algorithm==name)
+        self.training_physics_card.setVisible(is_mlp)
+        title='模型训练 · '+self.algorithm.currentText()
+        self.training_algorithm_card.caption=title
+        if self.training_algorithm_card.caption_widget:self.training_algorithm_card.caption_widget.setText(title)
+        if hasattr(self,'shell'):self.shell.workspace.module_dialogs[1].setWindowTitle(title)
+
+    def populate_tree_settings(self,cfg):
+        from ..algorithms.tree_settings import parameters
+        for name,edits in self.tree_edits.items():
+            for key,value in parameters(cfg,name).items():
+                edit=edits[key]
+                edit.setChecked(value) if isinstance(edit,QCheckBox) else edit.setValue(value)
+        self.update_algorithm_controls()
+
+    def collect_algorithm_settings(self,cfg,split):
+        name=self.algorithm.currentData();cfg['algorithm']['name']=name
+        if name=='mlp':
+            cfg['algorithm'].update(hidden_sizes=[int(v) for v in split(self.hidden.text())],dropout=self.dropout.value())
+        for algorithm,edits in self.tree_edits.items():
+            cfg['algorithm'][algorithm]={key:edit.isChecked() if isinstance(edit,QCheckBox) else edit.value() for key,edit in edits.items()}
 
     def start_training_mode(self,smoke=False):
         self.start_task('cross-validate' if self.split_method.currentIndex() else 'train',['--smoke'] if smoke else [])
@@ -60,3 +109,4 @@ class TrainingModuleUI:
         leave_one=bool(self.split_method.currentIndex());self.train_percent.setEnabled(not leave_one)
         ratio=self.train_percent.value()
         self.training_button.setText('开始留一井验证' if leave_one else f'开始随机划分训练（{ratio:g}% / {100-ratio:g}%）')
+

@@ -122,4 +122,5 @@ project_data:
   pressure_result: ''
 workspace: {}
 traditional_prediction: {}
+rock_physics: {}
 output_dir: outputs

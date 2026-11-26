@@ -132,34 +132,14 @@ class SeismicDataset:
                     interval_ms=self.interval_ms, map_points=len(self.map_indices),
                     time_convention=self.config.get('time_convention', 'twt'))
 
+    def well_context(self):
+        if not hasattr(self,'_well_context'):
+            from .well_overlays import WellContext
+            self._well_context=WellContext(self)
+        return self._well_context
+
     def well_locations(self):
-        """Resolve project wellheads on the same geometry used by the map."""
-        from .well_spatial import read_asset
-        locations = {}
-        warnings = []
-        for asset in self.config.get('well_assets', []):
-            if asset.get('kind') != 'coordinates':
-                continue
-            try:
-                _, frame = read_asset(asset)
-                for name, group in frame.groupby('well'):
-                    xy = group[['x', 'y']].to_numpy(dtype=float)
-                    if not np.isfinite(xy).all() or not np.allclose(xy, xy[0], atol=1e-6, rtol=0):
-                        warnings.append(f'{name} 的井口坐标不唯一，未显示')
-                        continue
-                    item = dict(name=str(name), x=float(xy[0, 0]), y=float(xy[0, 1]))
-                    if self.xy_available:
-                        distance, index = self.tree('xy')[0].query(xy[0])
-                        if distance <= float(self.config.get('well_max_distance', 25.)):
-                            item.update(inline=int(self.inline[index]), crossline=int(self.crossline[index]))
-                    if name in locations and locations[name] != item:
-                        warnings.append(f'{name} 的不同文件包含冲突井口坐标，未显示')
-                        locations[name] = None
-                    elif name not in locations:
-                        locations[name] = item
-            except Exception as exc:
-                warnings.append('井位读取失败：' + str(exc))
-        return [item for item in locations.values() if item is not None], warnings
+        return self.well_context().map_wells()
 
     def geometry(self):
         rows = self.map_indices
@@ -192,7 +172,7 @@ class SeismicDataset:
         self.check_fresh()
         return values, self.t0_ms + sample * self.interval_ms
 
-    def section(self, mode, *, coordinate_mode='lines', position=None, vertices=None):
+    def section(self, mode, *, coordinate_mode='lines', position=None, vertices=None, overlay_curves=None):
         self.check_fresh()
         coords = self.coordinates(coordinate_mode)
         if mode in ('inline', 'crossline'):
@@ -213,7 +193,9 @@ class SeismicDataset:
             rows[(variable[selected[aligned]] - low) // sx] = selected[aligned]
             line = coords[selected]
             # Simplify only the displayed location line; sampled rows keep actual geometry.
-            line = line[np.linspace(0, len(line) - 1, min(256, len(line)), dtype=int)]
+            overlay_rows=np.linspace(0,len(line)-1,min(256,len(line)),dtype=int)
+            line = line[overlay_rows]
+            overlay_line=line;overlay_axis=variable[selected][overlay_rows].astype(float)
             xlabel = 'Crossline' if mode == 'inline' else 'Inline'
             title = f'{mode.title()} {value}'
             selection = dict(position=value)
@@ -225,6 +207,7 @@ class SeismicDataset:
             # Keep holes in the acquisition footprint as gaps, never extrapolate across them.
             sy = max(1, int(np.ceil(self.nt * len(rows) / MAX_DISPLAY_CELLS)))
             line = np.asarray(vertices, dtype=float)
+            overlay_line=line;overlay_axis=np.r_[0.,np.cumsum(np.linalg.norm(np.diff(line,axis=0),axis=1))]
             xlabel = 'Distance (map coordinate units)' if coordinate_mode == 'xy' else 'Distance (line grid units)'
             title = 'Arbitrary section' if mode == 'arbitrary' else 'Polyline section'
             selection = dict(vertices=line.tolist())
@@ -245,6 +228,9 @@ class SeismicDataset:
         limits = np.quantile(finite, [.01, .99]).tolist() if len(finite) else [0., 1.]
         section = Slice(data, axis, self.t0_ms + samples * self.interval_ms,
                         xlabel, 'Time (ms)', self.label + ' · ' + title, True)
+        if len(overlay_curves or [])>64:raise ValueError('每个剖面最多同时叠加 64 条井曲线')
+        wells,warnings=self.well_context().section(overlay_line,overlay_axis,coordinate_mode,overlay_curves)
         return section, dict(limits=limits, unit=self.unit, line=line.tolist(), mode=mode,
+                             well_overlays=wells,overlay_warnings=warnings,well_distance_unit='XY 坐标单位' if coordinate_mode=='xy' else '线号单位',
                              coordinate_mode=coordinate_mode, time_stride=sy,
                              missing_columns=int((rows < 0).sum()), source=str(self.source),positive_only=bool(self.config.get('positive_only')), **selection)

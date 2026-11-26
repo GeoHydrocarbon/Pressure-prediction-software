@@ -2,11 +2,15 @@
 
 面向井资料训练、井压力预测与验证、三维 SEG-Y 压力预测的 Windows 桌面软件。
 
-当前源码版本：**0.14.1**。新增传统 Eaton 压力预测、正常压实趋势标定、混合测井道、逐曲线线／点样式和逐道图例设置。
+当前版本：**0.15.0**。包含 SEG-Y 道头设置与预检、传统 Eaton 压力预测、正常压实趋势标定、混合测井道、逐曲线线／点样式和逐道图例设置。
+
+本版新增 RF / XGBoost、TXT 井空间数据、MD / 方位角 / 井斜角轨迹、逐井应用时深关系及 Map / 剖面井曲线叠加。岩石物理工作台采用折叠设置与实时正演预览，支持矿物曲线、常见矿物预设、参数标定、完整成果保存及曲线回写。自动预览最多 240 个深度样点，不自动保存；正式成果需执行完整计算。详细操作见 [测井岩石物理建模](docs/测井岩石物理建模.md)。
+
+岩石物理库来源：[GeoHydrocarbon/shale_oil_rp/rockphypy-main](https://github.com/GeoHydrocarbon/shale_oil_rp/tree/main/rockphypy-main)。库源代码及 LGPL-3.0 许可证、来源与修改说明保存在 `overpressure/vendor/rockphypy/`。
 
 ## 同事下载安装
 
-打开本仓库的 [Releases](https://github.com/GeoHydrocarbon/Pressure-prediction-software/releases)，下载 `PressurePrediction-Windows-x64-CPU.zip`，完整解压并双击 `PressurePrediction.exe`。
+打开本仓库的 [Releases](https://github.com/GeoHydrocarbon/Pressure-prediction-software/releases)，下载对应版本的 Windows x64 CPU ZIP 运行包，完整解压并双击 `PressurePrediction.exe`。
 
 运行包自带 Python 和计算依赖，无需安装 Conda 或 CUDA。CPU 训练速度取决于电脑性能。运行包包含 `PressureWorker.exe` 和 `_internal`，请保持目录完整。项目与默认成果保存在 `%LOCALAPPDATA%\PressurePrediction`，也可以另存项目。
 
@@ -16,6 +20,7 @@
 
 - 按井管理测井曲线、井坐标、轨迹和时深关系，右键导入，支持多曲线显示。
 - Map 中央绘图工作区与独立模块弹窗，可从原始 SEG-Y 显示底图并交互拉取剖面。
+- SEG-Y 导入前设置线号与坐标的道头起始字节，提供常见预设和只读预检；通过后按文件保存设置，再打开 Map。
 - 传统压力预测：两点定义正常压实趋势，明确采用后执行单井／多井 Eaton 预测，无需训练模型；压力系数为 Pp / Ph。
 - 测井图可混合独立道与叠加道；每条曲线独立选择线、点或线＋点，设置颜色、线型、点形状和大小。
 - 逐道设置图例位置、字号、透明度、边框、列数和名称，支持拖动与导出；修复图窗关闭后无法重新显示的问题。
@@ -25,7 +30,7 @@
 - 自定义 inline/crossline 范围的 SEG-Y 压力预测，支持单位转换和有效样本掩码。
 - inline、crossline、时间与沿层位切片，多层位显示和空间插值、井曲线叠加及图件导出。
 
-当前算法为逐点 MLP；RF 和 XGBoost 尚未实现。本仓库不包含 LSTM 训练流程。
+训练算法包括逐点 MLP、RF 和 XGBoost；RF 与 XGBoost 本版不加物理约束。本仓库不包含 LSTM 训练流程。
 
 ## 首次使用
 

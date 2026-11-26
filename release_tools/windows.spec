@@ -3,7 +3,11 @@ from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 root = Path(SPECPATH).parent
 datas = [(str(root / 'project.example.yaml'), '.')]
-for name in ('numpy', 'pandas', 'scipy', 'scikit-learn', 'torch', 'PySide6', 'shiboken6', 'matplotlib', 'segyio', 'openpyxl', 'PyYAML'):
+# The model catalog reads source signatures; preserve the replaceable library
+# source, its license, and local modification/provenance notices together.
+for path in (root/'overpressure'/'vendor'/'rockphypy').iterdir():
+    if path.is_file():datas.append((str(path),'overpressure/vendor/rockphypy'))
+for name in ('numpy', 'pandas', 'scipy', 'scikit-learn', 'xgboost', 'torch', 'PySide6', 'shiboken6', 'matplotlib', 'segyio', 'openpyxl', 'PyYAML'):
     datas += copy_metadata(name)
 a = Analysis(
     [str(root / 'release_tools' / 'entry.py')],

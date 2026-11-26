@@ -26,9 +26,10 @@ ROOT = Path(__file__).resolve().parents[1]
 class GuiContractTests(unittest.TestCase):
     def test_business_module_entries_open_dialogs_without_duplicate_toolbar_actions(self):
         shell=self.window.shell
-        self.assertEqual(list(shell.module_actions),['training','traditional','wells','seismic'])
+        self.assertEqual(list(shell.module_actions),['training','traditional','wells','seismic','rock_physics'])
         self.assertEqual(self.window.pages.tabText(5),'三维地震预测')
-        for name,page in [('training',1),('traditional',7),('wells',3),('seismic',5)]:
+        self.assertEqual(list(shell.training_actions),['mlp','rf','xgboost'])
+        for name,page in [('traditional',7),('wells',3),('seismic',5),('rock_physics',8)]:
             action=shell.module_actions[name]
             self.assertIsNone(action.menu())
             action.trigger()
@@ -38,7 +39,11 @@ class GuiContractTests(unittest.TestCase):
             shell.workspace.module_dialogs[page].hide()
         for name in ('rf','xgboost'):
             index=self.window.algorithm.findData(name)
-            self.assertFalse(self.window.algorithm.model().item(index).isEnabled())
+            self.assertTrue(self.window.algorithm.model().item(index).isEnabled())
+            shell.training_actions[name].trigger()
+            self.assertEqual(self.window.collect_settings()['algorithm']['name'],name)
+            self.assertTrue(shell.workspace.module_dialogs[1].isVisible())
+        shell.training_actions['mlp'].trigger()
         self.assertEqual(self.window.collect_settings()['algorithm']['name'],'mlp')
         toolbar=self.window.findChild(QToolBar,'mainTools')
         self.assertFalse({'模型训练','井预测','地震预测'} & {action.text() for action in toolbar.actions()})
@@ -120,6 +125,9 @@ class GuiContractTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         cfg = yaml.safe_load((ROOT / "project.yaml").read_text(encoding="utf-8"))
+        cfg['algorithm']['name']='mlp';cfg['workspace']={}
+        cfg['seismic'].update(density_file='',impedance_file='')
+        cfg.setdefault('project_data',{}).update(well_assets=[],horizons=[],pressure_result='')
         cfg.setdefault('project_data',{})['wells']=[]
         cfg['data'].update(training_selection='well_library',development_wells=[],validation_wells=[],blind_wells=[],features=['Depth','AC','DEN','Ip'],feature_units={},target_curve='Pp',well_files=[],well_imports=[],split_method='random_points',train_ratio=.8)
         path = Path(self.tmp.name) / "project.yaml"
@@ -203,13 +211,58 @@ class GuiContractTests(unittest.TestCase):
         panel.mode.setCurrentIndex(5); self.assertEqual(panel.table.rowCount(), 2)
         self.assertEqual(panel.table_export.text(), "导出匹配明细")
 
-    def test_roundtrip_and_disabled_unimplemented_algorithms(self):
+    def test_roundtrip_and_available_algorithms(self):
         before = self.window.collect_settings()
         after = self.window.collect_settings()
         for key in ("data", "algorithm", "physics", "training"):
             self.assertEqual(after[key], before[key])
-        self.assertFalse(self.window.algorithm.model().item(1).isEnabled())
-        self.assertFalse(self.window.algorithm.model().item(2).isEnabled())
+        self.assertTrue(self.window.algorithm.model().item(1).isEnabled())
+        self.assertTrue(self.window.algorithm.model().item(2).isEnabled())
+
+    def test_algorithm_parameters_switch_save_and_preserve_mlp_physics(self):
+        w=self.window;w.physical_enabled.setChecked(True);w.lr.setValue(.002)
+        w.shell.open_training('rf')
+        self.assertTrue(w.hidden.isHidden());self.assertTrue(w.training_physics_card.isHidden())
+        self.assertFalse(w.tree_edits['rf']['n_estimators'].isHidden())
+        w.tree_edits['rf']['n_estimators'].setValue(123)
+        w.hidden.setText('unfinished MLP edit')
+        cfg=w.collect_settings('training');self.assertFalse(cfg['physics']['enabled'])
+        self.assertEqual(cfg['algorithm']['rf']['n_estimators'],123)
+        w.settings=cfg;w.populate();w.shell.open_training('xgboost')
+        w.tree_edits['xgboost']['learning_rate'].setValue(.07)
+        cfg=w.collect_settings('training');self.assertEqual(cfg['algorithm']['xgboost']['learning_rate'],.07)
+        self.assertEqual(cfg['algorithm']['rf']['n_estimators'],123)
+        w.shell.open_training('mlp');cfg=w.collect_settings('training')
+        self.assertTrue(cfg['physics']['enabled']);self.assertEqual(cfg['training']['learning_rate'],.002)
+        self.assertFalse(w.hidden.isHidden());self.assertTrue(w.tree_edits['rf']['n_estimators'].isHidden())
+
+    def test_model_rename_updates_tree_both_selectors_and_survives_reload(self):
+        from PySide6.QtWidgets import QMenu
+        from overpressure.config import load_project
+        w=self.window;shell=w.shell;paths=[]
+        for algorithm in ('rf','xgboost'):
+            folder=Path(self.tmp.name)/algorithm;folder.mkdir();paths.append(str(folder.resolve()))
+            (folder/'manifest.json').write_text(json.dumps(dict(algorithm=algorithm,display_name=algorithm+' test',status='completed',purpose='training')),encoding='utf-8')
+            shell.register_result(dict(path=str(folder),artifact='final_model',smoke=False))
+        w.bundle_path.setText(paths[0]);w.seismic_bundle.setText(paths[1])
+        original=(Path(paths[0])/'manifest.json').read_bytes()
+        menu=QMenu();shell.build_context_menu(menu,dict(model=True,path=paths[0]))
+        self.assertIn('重命名…',[a.text() for a in menu.actions()])
+        with patch('overpressure.workstation.QInputDialog.getText',return_value=('沙三段 RF',True)):
+            shell.rename_model(paths[0])
+        self.assertEqual(w.bundle_path.text(),paths[0]);self.assertEqual(w.seismic_bundle.text(),paths[1])
+        for choice in (w.well_model_choice,w.seismic_model_choice):
+            self.assertEqual(choice.itemText(choice.findData(paths[0])),'沙三段 RF [RF]')
+        self.assertTrue(any(label=='沙三段 RF [RF]' for label,_ in shell.entries()['模型']))
+        self.assertEqual((Path(paths[0])/'manifest.json').read_bytes(),original)
+        w.project=load_project(w.project.path);w.settings=deepcopy(w.project.settings);w.populate()
+        self.assertEqual(shell.model_aliases[paths[0]],'沙三段 RF')
+        w.well_model_choice.setCurrentIndex(w.well_model_choice.findData(paths[1]))
+        self.assertEqual(w.bundle_path.text(),paths[1])
+        self.assertEqual(w.seismic_bundle.text(),paths[1])
+        with patch('overpressure.workstation.QInputDialog.getText',return_value=('沙三段 RF',True)),patch('overpressure.workstation.QMessageBox.warning') as warning:
+            shell.rename_model(paths[1]);warning.assert_called_once()
+        self.assertNotIn(paths[1],shell.model_aliases)
 
     def test_smoke_completion_does_not_select_formal_model(self):
         self.window.handle_line('{"event":"completed","path":"smoke","smoke":true}')

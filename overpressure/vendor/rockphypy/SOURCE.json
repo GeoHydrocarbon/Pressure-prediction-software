@@ -1,0 +1,50 @@
+{
+  "repository": "https://github.com/GeoHydrocarbon/shale_oil_rp",
+  "path": "rockphypy-main/rockphypy",
+  "commit": "6ad244cb95e01e1c2491b38ad871605b9db5fb8d",
+  "archive_sha256": "fa46d9580a6928f51631e402320a97d2051aad5efa963032101aa8fea43dbd0d",
+  "upstream_project": "https://github.com/yujiaxin666/rockphypy",
+  "license": "LGPL-3.0",
+  "files": {
+    "Anisotropy.py": {
+      "upstream_sha256": "cdf29cf01a33222fe40dacc2064ca04a3f9fc6ec4eae32c7aff71278662e105e",
+      "vendored_sha256": "dc0410d6e3c83ab038c228d488b97cc38829d8b0e4c32e0cb4c9006d69266603"
+    },
+    "AVO.py": {
+      "upstream_sha256": "d2ea66741f4e41ba7b9e305ba1141bd29aba27b8e1e1d6ae9de0442362da303b",
+      "vendored_sha256": "32b6a0a9543b60b410bf92f9f1bc871833a1ed9eaa19c2adc3f15527c312abed"
+    },
+    "BW.py": {
+      "upstream_sha256": "c5144f13e3ea98ec393c015e965d209eb50431cfbe5f154014b043ec70dac728",
+      "vendored_sha256": "74e4075edba84f85d61c64c8cc16dabfb99cb350bf0da9c63aef0446e1915f25"
+    },
+    "EM.py": {
+      "upstream_sha256": "58f99f6f2107c3f4b8b603651ea6ed6d9ddedbab9d0ee7a6e7db7fa8511f8c37",
+      "vendored_sha256": "ed01f3e67e574260571a7f05adda67a6aba68b5bbb0dde5a9cc044b7e33ed636"
+    },
+    "Emp.py": {
+      "upstream_sha256": "75bd02074e79a752b2ae1a3c2c37fe947f01c00f6ed63d4c0e2779316cef66ee",
+      "vendored_sha256": "a4013e33c095d62668b718f4e021734945ab82a5117bdf74f0cf1a40dc12fc45"
+    },
+    "Fluid.py": {
+      "upstream_sha256": "574e6a34a73577f3eac2e73c5e932b8c7a740d3941535eca7a3b16fdf0c13365",
+      "vendored_sha256": "edafec66a5c264689db359883a0551e7f2b27eccaf9055db7cfc29b879d37838"
+    },
+    "GM.py": {
+      "upstream_sha256": "03007e26bba8e56808115f61cec4600d9c1fc13a136b85d9ee2994ac6c4260b2",
+      "vendored_sha256": "9c1b39020c3e256731aa477d226bca9344623c4e4d4620090e312b4d975100ff"
+    },
+    "Perm.py": {
+      "upstream_sha256": "96ea269a3b1619bb31b8981c8cda3fec356c1a806a55858bd48896173405374b",
+      "vendored_sha256": "7d9433b84b3249a75ef6de22158eed3a59fe08db944e436dd3ce42b839dc7708"
+    },
+    "QI.py": {
+      "upstream_sha256": "d03451da4a54fa2c6d5057504202186693d60b4566fc585eb9464237c3141a9e",
+      "vendored_sha256": "7155a914d7a111e479d73397c5fec591261d91499dc2ad292aad37c9bf890e57"
+    },
+    "utils.py": {
+      "upstream_sha256": "68671eb362429986c667cbdc347373088c10f4ec93f7fbca2425534ccf22e9a8",
+      "vendored_sha256": "a57e257b732128a458c479525dbf9f17798fd631e04ab21724aaef172a2be9d4"
+    }
+  }
+}

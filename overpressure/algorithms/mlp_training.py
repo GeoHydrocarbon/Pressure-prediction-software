@@ -59,6 +59,7 @@ def train(project: Project, *, smoke=False, cancel_file=None, _prepared=None, _r
     run = project.resolve(cfg["output_dir"]) / "models" / (datetime.now().strftime("%Y%m%d_%H%M%S_%f") + ("_smoke" if smoke else "_mlp"))
     run.mkdir(parents=True, exist_ok=False)
     manifest = {"schema_version": 1, "software_version": __version__, "status": "running", "algorithm": "mlp",
+                "display_name": f"MLP · {datetime.now():%Y-%m-%d %H:%M:%S.%f}",
                 "purpose": "smoke_test" if smoke else "final_refit" if _refit_selection else "training", "created_at": datetime.now().astimezone().isoformat(),
                 "features": list(features), "feature_units":feature_units(cfg,features), "target_curve":cfg["data"].get("target_curve","Pp"), "architecture": cfg["algorithm"], "project": cfg,
                 "source_sha256": prepared.audit.report["source_sha256"],
@@ -142,3 +143,4 @@ def train(project: Project, *, smoke=False, cancel_file=None, _prepared=None, _r
         save_json(run / "manifest.json", manifest)
         raise
     return run
+

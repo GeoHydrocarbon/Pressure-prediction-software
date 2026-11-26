@@ -2,48 +2,9 @@
 from copy import deepcopy
 from pathlib import Path
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QListWidget,
-    QDialog, QFormLayout, QComboBox, QCheckBox, QDialogButtonBox, QFileDialog, QMessageBox, QDoubleSpinBox)
-from .data import read_table
-from .ui_style import Card,polish_layouts
-
-
-class AssetDialog(QDialog):
-    def __init__(self, parent, path, kind, forced_well=''):
-        super().__init__(parent); self.path = path; self.kind = kind
-        self.setWindowTitle('导入井数据：字段对应'); form = QFormLayout(self)
-        form.addRow(QLabel(Path(path).name)); names = list(map(str, read_table(Path(path), nrows=0).columns))
-        self.columns = {}
-        aliases = {'well': ['well','井名','Well'], 'depth': ['Depth','depth','深度','MD'], 'x': ['X','x','Easting'], 'y': ['Y','y','Northing']}
-        for key in ('well',) + (() if kind == 'coordinates' else ('depth',)) + (('x','y') if kind != 'curves' else ()):
-            combo = QComboBox(); combo.addItems(names)
-            if key=='well' and forced_well:combo.insertItem(0,'');combo.setCurrentIndex(0)
-            for alias in aliases[key]:
-                if alias in names: combo.setCurrentText(alias); break
-            self.columns[key] = combo; form.addRow({'well':'井名列','depth':'深度列','x':'X / X 偏移列','y':'Y / Y 偏移列'}[key], combo)
-        self.depth_unit = QComboBox(); self.depth_unit.addItems(['m','ft'])
-        if kind != 'coordinates': form.addRow('深度单位', self.depth_unit)
-        self.relative = QCheckBox('轨迹 XY 是相对井口的偏移量')
-        if kind == 'trajectory': form.addRow(self.relative)
-        self.time = QComboBox(); self.time.addItems(['']+names)
-        self.time_unit = QComboBox(); self.time_unit.addItems(['ms','s'])
-        self.convention = QComboBox(); self.convention.addItems(['twt','owt'])
-        self.pressure = QComboBox(); self.pressure.addItems(['']+names)
-        self.pressure_unit = QComboBox(); self.pressure_unit.addItems(['MPa','kPa','psi'])
-        self.forced_well=forced_well
-        if kind == 'curves':
-            form.addRow('时间列（留空使用项目时深关系）', self.time); form.addRow('时间单位',self.time_unit)
-            form.addRow('双程 twt / 单程 owt',self.convention)
-            form.addRow('用于井震对比的压力列（可不选）',self.pressure); form.addRow('该压力列单位',self.pressure_unit)
-        hint = QLabel('文件可包含多口井，按井名关联。XY 必须与地震缩放后的平面坐标一致。轨迹覆盖外不外推。'); hint.setWordWrap(True); form.addRow(hint)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); form.addRow(buttons)
-        polish_layouts(self)
-
-    def config(self):
-        return dict(path=self.path, kind=self.kind, columns={k:v.currentText() for k,v in self.columns.items()},well_name=self.forced_well,
-            depth_unit=self.depth_unit.currentText(), relative=self.relative.isChecked(), time_column=self.time.currentText(),
-            time_unit=self.time_unit.currentText(), time_convention=self.convention.currentText(),
-            pressure_column=self.pressure.currentText(), pressure_unit=self.pressure_unit.currentText())
+    QDialog, QFormLayout, QCheckBox, QDialogButtonBox, QFileDialog, QMessageBox, QDoubleSpinBox)
+from .ui_style import Card
+from .spatial_asset_dialog import AssetDialog
 
 
 class ProjectCatalog(QWidget):
@@ -75,11 +36,14 @@ class ProjectCatalog(QWidget):
         self.hlist.addItems([a.get('display_name',a['path']) for a in self.horizons])
 
     def add_asset(self,kind):
-        path,_=QFileDialog.getOpenFileName(self,'选择井数据','','表格 (*.csv *.xlsx *.xls)')
+        path,_=QFileDialog.getOpenFileName(self,'选择井数据','','表格 (*.csv *.xlsx *.txt)')
         if not path:return
         try:
             dialog=AssetDialog(self,path,kind)
-            if dialog.exec()==QDialog.DialogCode.Accepted:self.assets.append(dialog.config()); self.refresh()
+            if dialog.exec()==QDialog.DialogCode.Accepted:
+                from .well_spatial import read_asset
+                asset=dialog.config();_,frame=read_asset(asset);asset['wells']=frame.well.dropna().unique().tolist()
+                self.assets.append(asset);self.refresh()
         except Exception as exc:QMessageBox.warning(self,'读取失败',str(exc))
 
     def remove(self):
@@ -91,11 +55,7 @@ class ProjectCatalog(QWidget):
         if i<0:return
         asset=self.assets[i]
         try:
-            dialog=AssetDialog(self,str(self.owner.project.resolve(asset['path'])),asset['kind'],forced_well=asset.get('well_name',''))
-            for key,box in dialog.columns.items():box.setCurrentText(asset['columns'][key])
-            for key,box in [('depth_unit',dialog.depth_unit),('time_column',dialog.time),('time_unit',dialog.time_unit),('time_convention',dialog.convention),('pressure_column',dialog.pressure),('pressure_unit',dialog.pressure_unit)]:
-                if key in asset:box.setCurrentText(asset[key])
-            dialog.relative.setChecked(asset.get('relative',False))
+            dialog=AssetDialog(self,str(self.owner.project.resolve(asset['path'])),asset['kind'],forced_well=asset.get('well_name',''),initial=asset)
             if dialog.exec()==QDialog.DialogCode.Accepted:
                 from .well_spatial import read_asset
                 updated=dialog.config();updated['excluded_wells']=asset.get('excluded_wells',[])

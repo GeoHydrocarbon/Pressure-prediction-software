@@ -124,6 +124,7 @@ class WellLibrary:
         self.selection_changed()
         if hasattr(self.owner,'well_prediction'):self.owner.well_prediction.refresh_library()
         if hasattr(self.owner,'traditional'):self.owner.traditional.refresh_library()
+        if hasattr(self.owner,'rock_physics'):self.owner.rock_physics.workflow.refresh_library()
         if hasattr(self.owner,'shell'):self.owner.shell.signature=None;self.owner.shell.refresh_tree()
     def selection_changed(self,*_):
         if self.loading:return
@@ -184,7 +185,7 @@ class WellLibrary:
     def import_spatial(self,kind,well=''):
         from .project_catalog import AssetDialog
         from .well_spatial import read_asset
-        path,_=QFileDialog.getOpenFileName(self.owner,'导入井口坐标' if kind=='coordinates' else '导入井轨迹',str(self.owner.project.path.parent),'井数据 (*.xlsx *.csv)')
+        path,_=QFileDialog.getOpenFileName(self.owner,'导入井口坐标' if kind=='coordinates' else '导入井轨迹',str(self.owner.project.path.parent),'井数据 (*.xlsx *.csv *.txt)')
         if not path:return
         try:
             dialog=AssetDialog(self.owner,path,kind,forced_well=well)

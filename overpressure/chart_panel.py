@@ -135,6 +135,8 @@ class ChartPanel(QWidget):
             self.directory.clear(); self.well.blockSignals(True); self.well.clear(); self.well.blockSignals(False)
         self.history = pd.DataFrame(records)
         self.context.setText("实时训练损失；内部验证集用于早停与选参，最终盲井不参与。" if "validation_data" in self.history else "固定轮数最终重训：不使用验证集或盲井，仅显示训练损失。")
+        if records and records[0].get('iteration_unit')=='trees':
+            self.context.setText('随机森林：按树的数量显示 MSE，使用设定树数，不执行早停；盲井不参与训练。')
         self.mode.blockSignals(True); self.mode.setCurrentIndex(0); self.mode.blockSignals(False); self.redraw()
 
     def selected_well(self): return self.well.currentData()

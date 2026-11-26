@@ -135,6 +135,10 @@ class MapView(QWidget):
         config = self.dataset.currentData()
         if config == self.desired_config:
             return
+        context_keys={'well_assets','well_library','time_depth_relations','project_path','well_max_distance'}
+        if config and self.desired_config and self.metadata and self.process is not None and {k:v for k,v in config.items() if k not in context_keys}=={k:v for k,v in self.desired_config.items() if k not in context_keys}:
+            self.desired_config=config;self.open_config=config
+            self.enqueue('wells',dict(command='wells',config=config));return
         self.desired_config = config
         self.shutdown()
         self.metadata = None
@@ -210,7 +214,7 @@ class MapView(QWidget):
             self.ready = True
             self.enqueue('open', dict(command='open', config=self.open_config))
             return
-        if kind not in ('opened', 'map', 'section', 'error'):
+        if kind not in ('opened', 'map', 'section', 'error','wells'):
             return
         self.busy = False
         key = next((key for key, ident in self.latest.items() if ident == event.get('id')), None)
@@ -218,6 +222,11 @@ class MapView(QWidget):
             return
         if kind == 'error':
             self.status.setText('地震浏览失败：' + event['message'])
+            return
+        if kind=='wells':
+            self.wells=event['wells'];self.metadata['wells']=self.wells;self.draw_map(preserve=True)
+            if event.get('warnings'):self.owner.log.appendPlainText('\n'.join(event['warnings']))
+            for ident,record in self.paths.items():self.request_section(ident,record)
             return
         if kind == 'opened':
             self.metadata = event['metadata']
@@ -314,14 +323,17 @@ class MapView(QWidget):
             else:
                 self.ax.scatter(points[:, 0], points[:, 1], s=2, c='#9aaebd', linewidths=0, rasterized=True)
         for well in self.wells:
+            trajectory=well.get('trajectory_xy' if xy else 'trajectory_lines')
+            if trajectory:
+                path=np.asarray(trajectory,dtype=float);self.ax.plot(path[:,0],path[:,1],color='#243b53',linewidth=1.8,zorder=5)
             if xy:
                 position = (well['x'], well['y'])
             elif 'inline' in well:
                 position = (well['crossline'], well['inline'])
             else:
                 continue
-            self.ax.plot(*position, marker='o', color='#243b53', markersize=5)
-            self.ax.annotate(well['name'], position, xytext=(5, 5), textcoords='offset points', fontsize=9)
+            self.ax.plot(*position, marker='o', color='#243b53', markersize=5,zorder=7)
+            self.ax.annotate(well['name'], position, xytext=(5, 5), textcoords='offset points', fontsize=9,zorder=8)
         for ident, record in self.paths.items():
             line = np.asarray(record.get('line', record.get('vertices', [])))
             if not len(line):
@@ -375,9 +387,12 @@ class MapView(QWidget):
         record = self.paths.get(self.active_line)
         if not record or not self.metadata:
             return
+        self.request_section(self.active_line,record)
+
+    def request_section(self,ident,record):
         self.status.setText('正在按需读取剖面……')
-        self.enqueue(self.active_line, dict(command='section', view_id=self.active_line,
-                                           **{k: record[k] for k in ('mode', 'vertices', 'position', 'coordinate_mode')}))
+        self.enqueue(ident, dict(command='section',view_id=ident,overlay_curves=record.get('overlay_curves',[]),
+                                **{k:record[k] for k in ('mode','vertices','position','coordinate_mode')}))
 
     def valid_event(self, event):
         return self.metadata is not None and event.inaxes is self.ax and event.xdata is not None and event.ydata is not None and not self.toolbar.mode

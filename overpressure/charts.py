@@ -104,7 +104,8 @@ def training_figure(history, style=None):
     ax.plot(history["epoch"], history["train_data"], label="Training data MSE", color="#23628b")
     if "validation_data" in history:
         ax.plot(history["epoch"], history["validation_data"], label="Validation data MSE", color="#c18555", linewidth=1.6)
-    ax.set(xlabel="Epoch", ylabel="MSE (MPa squared)", title="Training and internal validation" if "validation_data" in history else "Final refit: fixed epochs, no validation or blind wells")
+    unit=history['iteration_unit'].iloc[0] if 'iteration_unit' in history else 'epochs'
+    ax.set(xlabel={'trees':'Number of trees','boosting_rounds':'Boosting round'}.get(unit,'Epoch'), ylabel="MSE (MPa squared)", title="Training and internal validation" if "validation_data" in history else "Final refit: fixed iterations, no validation or blind wells")
     ax.grid(alpha=.2); ax.legend()
     return finish_style(figure, style)
 

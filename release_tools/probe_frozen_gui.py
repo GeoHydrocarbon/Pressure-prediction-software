@@ -7,7 +7,7 @@ for key in ('PYTHONPATH','PYTHONHOME','PRESSURE_WORKER_PYTHON','QT_PLUGIN_PATH',
 env['PATH']=os.pathsep.join((str(Path(env['WINDIR'])/'System32'),env['WINDIR']))
 env['LOCALAPPDATA']=str(folder/'userdata')
 report=folder/'gui.json'
-result=subprocess.run([str(app/'PressurePrediction.exe'),'--gui-smoke',str(report)],env=env,cwd=folder,timeout=60)
+result=subprocess.run([str(app/'PressurePrediction.exe'),'--gui-smoke',str(report),*sys.argv[3:]],env=env,cwd=folder,timeout=90)
 print('returncode',result.returncode)
 if report.exists():print(report.read_text(encoding='utf-8'))
 else:print('No GUI report')

@@ -53,6 +53,13 @@ def main():
         run('overpressure',['train','--project',str(project)])
         bundles = list((folder/'outputs').rglob('weights.pt'))
         if len(bundles)!=1: raise RuntimeError('Packaged training did not produce weights.pt')
+        for algorithm in ('rf','xgboost'):
+            cfg['algorithm']['name']=algorithm
+            project.write_text(yaml.safe_dump(cfg,allow_unicode=True),encoding='utf-8')
+            run('overpressure',['train','--project',str(project),'--smoke'])
+            manifests=[json.loads(p.read_text(encoding='utf-8')) for p in (folder/'outputs/models').rglob('manifest.json')]
+            assert any(m.get('algorithm')==algorithm and m.get('status')=='completed' for m in manifests),algorithm
+        cfg['algorithm']['name']='mlp'
         spec = segyio.spec(); spec.sorting=2; spec.format=5
         spec.samples=[0.,10.,20.]; spec.ilines=[10,11]; spec.xlines=[20,21]
         seismic = folder/'synthetic.sgy'
@@ -106,22 +113,35 @@ def main():
         reports=list((folder/'outputs'/'traditional').rglob('traditional.json'))
         assert len(reports)==2
         for path in reports:assert json.loads(path.read_text(encoding='utf-8'))['status']=='completed'
+        from overpressure.rock_physics.well_model import default_scheme
+        rp=default_scheme();rp.update(well='Synthetic_0',depth_min=100.,depth_max=200.)
+        rp['bindings']['phi']=dict(curve='',constant=.12,unit='fraction')
+        well=cfg['project_data']['wells'][0]
+        for operation in ('well_live','well_log'):
+            before=set((folder/'outputs').rglob('result.json'))
+            text=run('overpressure.rock_physics.worker',[],json.dumps(dict(operation=operation,scheme=rp,well=well,output_dir=str(folder/'outputs/rp'))))
+            event=[json.loads(line) for line in text.splitlines() if line.startswith('{')][-1]
+            assert event['event']==('live_preview' if operation=='well_live' else 'completed'),event
+            assert event['result']['summary']['modeled_rows']>0
+            if operation=='well_live':assert set((folder/'outputs').rglob('result.json'))==before
         report = folder/'gui.json'
-        result = subprocess.run([str(gui),'--gui-smoke',str(report)],env=env,cwd=folder,timeout=60)
+        result = subprocess.run([str(gui),'--gui-smoke',str(report),str(seismic)],env=env,cwd=folder,timeout=90)
         if result.returncode or not report.exists():
             detail=report.read_text(encoding='utf-8') if report.exists() else 'No report'
             raise RuntimeError('Packaged GUI did not pass: '+detail)
         gui_report=json.loads(report.read_text(encoding='utf-8'))
         assert gui_report['gui']=='passed',gui_report
-        for field in ('blank_project','traditional_module','mixed_tracks','curve_styles','legend_settings','reopen_plot'):
+        for field in ('blank_project','traditional_module','mixed_tracks','curve_styles','legend_settings','reopen_plot','rock_physics_live','rock_physics_save'):
             assert gui_report[field],gui_report
+        assert gui_report['segy_import']['passed'] and gui_report['segy_import']['section'],gui_report
         if len(sys.argv)>2:
             reports_dir=Path(sys.argv[2]).resolve();reports_dir.mkdir(parents=True,exist_ok=True)
             shutil.copyfile(report,reports_dir/'packaged_gui.json')
             shutil.copyfile(report.with_suffix('.png'),reports_dir/'packaged_gui.png')
             (reports_dir/'packaged_checks.json').write_text(json.dumps(dict(status='passed',gui=gui_report,
                 checks=['CPU training','SEG-Y inference','geometry','slice reader','Map section','traditional trend',
-                        'Eaton prediction','blank GUI','mixed tracks','curve styles','legend settings','reopen plot']),
+                        'Eaton prediction','blank GUI','mixed tracks','curve styles','legend settings','reopen plot','SEG-Y import settings and preflight',
+                        'RF training','XGBoost training','RockPhyPy resources','rock physics live worker','rock physics saved worker','live GUI','saved GUI']),
                 ensure_ascii=False,indent=2),encoding='utf-8')
         print('Packaged CPU training, SEG-Y, Map section, Eaton, blank GUI, mixed tracks and legend smoke tests passed')
 

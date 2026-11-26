@@ -71,12 +71,17 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
         self.traditional=TraditionalPanel(self)
         self.traditional_page=self.page('传统压力预测','正常压实趋势标定与 Eaton 井压力预测。',show_heading=False)
         self.traditional_page.addWidget(self.traditional)
+        from .rock_physics_panel import RockPhysicsPanel
+        self.rock_physics=RockPhysicsPanel(self)
+        # RP pages scroll internally so worker status/cancellation stay in view.
+        self.pages.addWidget(self.rock_physics)
         self.slices.well_config_provider = self.catalog.well_config
         self.slices.horizon_config_provider = self.catalog.horizon_configs
         self.slices.interpolation_registered = self.catalog.register_interpolated_horizon
         self.nav.currentRowChanged.connect(self.navigate_to_page)
         self.pages.currentChanged.connect(self.nav.setCurrentRow)
         self.shell = WorkstationShell(self)
+        self.rock_physics.resultReady.connect(self.rock_physics_completed)
         self.nav.setCurrentRow(0)
         self.populate()
         for edit in (self.den_path,self.ip_path): edit.textChanged.connect(self.invalidate_seismic_geometry)
@@ -272,9 +277,10 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
         self.dropout.setValue(cfg["algorithm"]["dropout"])
         for attr, key in (("epochs", "epochs"), ("batch", "batch_size"), ("lr", "learning_rate"), ("patience", "patience")):
             getattr(self, attr).setValue(cfg["training"][key])
-        self.physical_enabled.setChecked(cfg["physics"]["enabled"])
+        self.physical_enabled.setChecked(cfg["physics"]["enabled"] if cfg['algorithm']['name']=='mlp' else cfg['algorithm'].get('mlp_physics_enabled',False))
         for key, edit in self.physics_edits.items():
             edit.setValue(cfg["physics"][key]); edit.setEnabled(self.physical_enabled.isChecked())
+        self.populate_tree_settings(cfg)
         self.td_method.setCurrentText(td["method"]); self.coefficients.setText(", ".join(map(str, td.get("coefficients", []))))
         self.td_file.setText(td.get("table_file", ""))
         for attr, key in (("td_unit", "time_unit"), ("td_convention", "time_convention"), ("td_depth_unit", "depth_unit")):
@@ -284,6 +290,7 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
         self.well_prediction.populate(self.project)
         self.well_prediction.refresh_library(cfg.get('well_prediction',{}).get('library_wells',[]))
         self.traditional.populate(cfg)
+        self.rock_physics.populate(cfg.get('rock_physics',{}))
         self.library.migrate_legacy(cfg)
         self.invalidate_seismic_geometry()
 
@@ -309,9 +316,10 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
         cfg["seismic"]["block_traces"] = self.block_traces.value()
         cfg['seismic']['prediction_range']={key:edit.value() for key,edit in self.prediction_range_edits.items()}
         if not independent_task:
-            cfg["algorithm"].update(name=self.algorithm.currentData(), hidden_sizes=[int(v) for v in split(self.hidden.text())], dropout=self.dropout.value())
+            self.collect_algorithm_settings(cfg,split)
             cfg["training"].update(epochs=self.epochs.value(), batch_size=self.batch.value(), learning_rate=self.lr.value(), patience=self.patience.value())
-            cfg["physics"]["enabled"] = self.physical_enabled.isChecked()
+            cfg["physics"]["enabled"] = self.algorithm.currentData()=='mlp' and self.physical_enabled.isChecked()
+            cfg['algorithm']['mlp_physics_enabled']=self.physical_enabled.isChecked()
             for key, edit in self.physics_edits.items(): cfg["physics"][key] = edit.value()
         else:
             cfg['data']=deepcopy(self.settings['data'])
@@ -322,16 +330,21 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
         cfg["time_depth"].update(method=self.td_method.currentText(), coefficients=coefficients,
             table_file=self.td_file.text().strip(), time_unit=self.td_unit.currentText(), time_convention=self.td_convention.currentText(),
             depth_unit=self.td_depth_unit.currentText())
-        if not cfg["algorithm"]["hidden_sizes"] or any(v <= 0 for v in cfg["algorithm"]["hidden_sizes"]):
+        if cfg['algorithm']['name']=='mlp' and (not cfg["algorithm"]["hidden_sizes"] or any(v <= 0 for v in cfg["algorithm"]["hidden_sizes"])):
             raise ValueError("隐藏层必须为正整数列表")
         if hasattr(self,'shell'):cfg['workspace']=deepcopy(self.shell.workspace_settings())
         cfg['traditional_prediction']=self.traditional.collect()
+        cfg['rock_physics']=self.rock_physics.collect_state()
         strip_depth_metadata(cfg); validate_settings(cfg)
         return cfg
 
     def save_settings(self, scope='all'):
         try:
             cfg = self.collect_settings(scope)
+            if scope=='all':
+                try:self.shell.remember_time_depth(cfg['time_depth'])
+                except (ValueError,OSError,KeyError):pass
+                cfg['workspace']=deepcopy(self.shell.workspace_settings())
             temp = self.project.path.with_suffix(".yaml.tmp")
             temp.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
             temp.replace(self.project.path)
@@ -342,6 +355,7 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
             QMessageBox.warning(self, "设置需要修改", str(exc)); return False
 
     def open_project(self):
+        if not self.can_switch_project():return
         path, _ = QFileDialog.getOpenFileName(self, "打开项目", str(self.project.path.parent), "项目文件 (*.yaml *.yml)")
         if path:
             try:
@@ -352,6 +366,7 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
             except Exception as exc: QMessageBox.warning(self, "无法打开项目", str(exc))
 
     def new_project(self):
+        if not self.can_switch_project():return
         path,_=QFileDialog.getSaveFileName(self,'新建超压预测项目',str(self.project.path.parent/'新项目.yaml'),'项目文件 (*.yaml)')
         if not path:return
         try:
@@ -359,7 +374,7 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
             cfg['data'].update(training_selection='well_library',well_files=[],well_imports=[],development_wells=[],validation_wells=[],blind_wells=[],features=list(FEATURES),target_curve='Pp',feature_units={},split_method='random_points')
             cfg['data'].pop('well_file',None)
             cfg['project_data']=dict(wells=[],well_assets=[],horizons=[],pressure_result='',max_distance=25.,vertical_fallback=True)
-            cfg['workspace']={};cfg['traditional_prediction']={};cfg['physics']['enabled']=False
+            cfg['workspace']={};cfg['traditional_prediction']={};cfg['rock_physics']={};cfg['physics']['enabled']=False
             cfg['seismic'].update(density_file='',impedance_file='',prediction_range={k:0 for k in self.prediction_range_edits})
             cfg['time_depth']=dict(method='polynomial',coefficients=[0.,1000.],time_unit='s',time_convention='twt',depth_unit='m',table_file='')
             cfg['well_prediction'].update(well_files=[],well_imports=[],measurement_files=[],measurement_imports=[],library_wells=[],use_library=True,independence_confirmed=False)
@@ -368,6 +383,7 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
         except Exception as exc:QMessageBox.warning(self,'无法新建项目',str(exc))
 
     def save_project_as(self):
+        if not self.can_switch_project():return
         path,_=QFileDialog.getSaveFileName(self,'项目另存为',str(self.project.path),'项目文件 (*.yaml)')
         if not path:return
         try:
@@ -459,7 +475,8 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
                 self.progress.setValue((self.cv_fold - 1) * event["epochs"] + event["epoch"])
             else:
                 self.progress.setRange(0, event["epochs"]); self.progress.setValue(event["epoch"])
-            message = f"第 {event['epoch']} 轮  训练 MSE={event['train_data']:.4f}"
+            unit='棵树' if event.get('iteration_unit')=='trees' else '轮'
+            message = f"第 {event['epoch']} {unit}  训练 MSE={event['train_data']:.4f}"
             message += f"  内部验证 MSE={event['validation_data']:.4f}" if "validation_data" in event else "  固定轮数最终重训（无验证/盲井参与）"
             self.log.appendPlainText(message)
         elif kind == "completed":
@@ -533,6 +550,7 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
             self.cancel_task()
             self.status.setText("请等待当前任务结束后关闭窗口。"); event.ignore()
         else:
+            self.rock_physics.stop()
             self.shell.timer.stop()
             self.shell.workspace.shutdown()
             self.library.stop();self.shell.curve_viewer.stop()
@@ -544,8 +562,24 @@ class MainWindow(TrainingModuleUI, WellModuleUI, SeismicModuleUI, QMainWindow):
                 proc.deleteLater()
             self.slices.shutdown(); event.accept()
 
+    def can_switch_project(self):
+        if self.rock_physics.process is not None:
+            QMessageBox.information(self,'正在计算','请等待岩石物理计算完成，或先取消计算，再切换项目。');return False
+        return True
+
+    def rock_physics_completed(self,path,result):
+        self.shell.register_result(dict(artifact='rock_physics',path=path,smoke=False))
+        try:
+            self.shell.workspace.open_rock_physics(path,result)
+            self.shell.persist_workspace()
+            self.status.setText('岩石物理建模完成：'+result.get('title',result.get('model_id','')))
+        except Exception as exc:
+            self.log.appendPlainText('岩石物理成果已生成，显示或项目关联保存失败：'+str(exc))
+            QMessageBox.warning(self,'成果显示需要检查',str(exc))
+
 
 def configure_application(app):
+    if app.property('overpressureConfigured'):return
     if not QFontDatabase.families() and sys.platform == "win32":
         fonts = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
         for name in ("msyh.ttc", "msyhbd.ttc"):
@@ -554,6 +588,7 @@ def configure_application(app):
     app.setFont(QFont("Microsoft YaHei UI", 10))
     app.setStyle("Fusion")
     app.setStyleSheet(QSS)
+    app.setProperty('overpressureConfigured',True)
 def main():
     app = QApplication(sys.argv)
     configure_application(app)

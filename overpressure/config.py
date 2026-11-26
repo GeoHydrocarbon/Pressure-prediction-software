@@ -96,6 +96,9 @@ def validate_settings(cfg: dict) -> None:
     name = cfg["algorithm"]["name"]
     if name not in ALGORITHMS:
         raise ValueError(f"未知算法: {name}")
+    if name in ('rf', 'xgboost'):
+        from .algorithms.tree_settings import parameters
+        parameters(cfg)
     physics = cfg["physics"]
     if not isinstance(physics["enabled"], bool):
         raise ValueError("physics.enabled 必须为 true 或 false")

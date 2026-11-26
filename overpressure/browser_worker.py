@@ -39,6 +39,11 @@ def main():
                     continue
                 if dataset is None:
                     raise ValueError('请先载入地震数据')
+                if command=='wells':
+                    dataset.config.update({k:v for k,v in request['config'].items() if k in ('well_assets','well_library','time_depth_relations','project_path','well_max_distance')})
+                    if hasattr(dataset,'_well_context'):del dataset._well_context
+                    wells,warnings=dataset.well_locations()
+                    emit('wells',id=request['id'],wells=wells,warnings=warnings);continue
                 # Only one response file is live; the GUI acknowledges it by sending the next request.
                 target = folder / 'display.npz'
                 if command == 'map':
@@ -47,7 +52,7 @@ def main():
                     emit('map', id=request['id'], path=str(target), time_ms=time_ms)
                 elif command == 'section':
                     section, meta = dataset.section(request['mode'], coordinate_mode=request.get('coordinate_mode', 'lines'),
-                                                    position=request.get('position'), vertices=request.get('vertices'))
+                                                    position=request.get('position'), vertices=request.get('vertices'),overlay_curves=request.get('overlay_curves',[]))
                     np.savez_compressed(target, values=section.values, x=section.x, y=section.y,
                                         xlabel=np.array(section.xlabel), ylabel=np.array(section.ylabel), title=np.array(section.title))
                     emit('section', id=request['id'], view_id=request['view_id'], path=str(target), metadata=meta)
